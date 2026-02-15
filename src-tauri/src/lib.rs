@@ -73,6 +73,10 @@ pub struct ProjectMetadata {
     pub dependencies: Vec<String>,
     pub dev_dependencies: Vec<String>,
     pub entry_point: Option<String>,
+    #[serde(default)]
+    pub runtime: Vec<String>,
+    #[serde(default)]
+    pub requirements: Vec<String>,
 }
 
 // ─── Plugin System ────────────────────────────────────────────
@@ -356,6 +360,8 @@ fn extract_metadata(root: &Path, project_type: &str) -> ProjectMetadata {
         dependencies: Vec::new(),
         dev_dependencies: Vec::new(),
         entry_point: None,
+        runtime: Vec::new(),
+        requirements: Vec::new(),
     };
 
     match project_type {
@@ -404,11 +410,47 @@ fn extract_package_json(root: &Path, meta: &mut ProjectMetadata) {
             if let Some(main) = pkg.get("main").and_then(|v| v.as_str()) {
                 meta.entry_point = Some(main.to_string());
             }
+            // CodePack: 提取 engines 环境信息
+            if let Some(engines) = pkg.get("engines").and_then(|v| v.as_object()) {
+                for (key, val) in engines {
+                    if let Some(v) = val.as_str() {
+                        meta.runtime.push(format!("{} {}", key, v));
+                    }
+                }
+            }
+            // CodePack: 提取带版本号的依赖清单
             if let Some(deps) = pkg.get("dependencies").and_then(|v| v.as_object()) {
                 meta.dependencies = deps.keys().cloned().collect();
+                for (key, val) in deps {
+                    if let Some(v) = val.as_str() {
+                        meta.requirements.push(format!("{}@{}", key, v));
+                    }
+                }
             }
             if let Some(deps) = pkg.get("devDependencies").and_then(|v| v.as_object()) {
                 meta.dev_dependencies = deps.keys().cloned().collect();
+            }
+            // CodePack: 检测 .nvmrc / .node-version
+            if meta.runtime.is_empty() {
+                for rc in &[".nvmrc", ".node-version"] {
+                    if let Ok(ver) = fs::read_to_string(root.join(rc)) {
+                        let v = ver.trim().to_string();
+                        if !v.is_empty() {
+                            meta.runtime.push(format!("node {}", v));
+                            break;
+                        }
+                    }
+                }
+            }
+            // CodePack: 检测 TypeScript 版本
+            if let Ok(ts_content) = fs::read_to_string(root.join("tsconfig.json")) {
+                if let Ok(ts) = serde_json::from_str::<serde_json::Value>(&ts_content) {
+                    if let Some(target) = ts.get("compilerOptions")
+                        .and_then(|c| c.get("target"))
+                        .and_then(|v| v.as_str()) {
+                        meta.runtime.push(format!("ts target: {}", target));
+                    }
+                }
             }
         }
     }
@@ -429,9 +471,27 @@ fn extract_cargo_toml(root: &Path, meta: &mut ProjectMetadata) {
                         meta.description = Some(desc.to_string());
                     }
                 }
+                // CodePack: Rust edition 和 MSRV
+                if let Some(edition) = pkg.get("edition").and_then(|v| v.as_str()) {
+                    meta.runtime.push(format!("rust edition {}", edition));
+                }
+                if let Some(msrv) = pkg.get("rust-version").and_then(|v| v.as_str()) {
+                    meta.runtime.push(format!("rust >={}", msrv));
+                }
             }
+            // CodePack: 提取带版本号的依赖
             if let Some(deps) = doc.get("dependencies").and_then(|v| v.as_table()) {
                 meta.dependencies = deps.keys().cloned().collect();
+                for (key, val) in deps {
+                    let ver_str = if let Some(v) = val.as_str() {
+                        v.to_string()
+                    } else if let Some(t) = val.as_table() {
+                        t.get("version").and_then(|v| v.as_str()).unwrap_or("*").to_string()
+                    } else {
+                        "*".to_string()
+                    };
+                    meta.requirements.push(format!("{}@{}", key, ver_str));
+                }
             }
             if let Some(deps) = doc.get("dev-dependencies").and_then(|v| v.as_table()) {
                 meta.dev_dependencies = deps.keys().cloned().collect();
@@ -456,12 +516,17 @@ fn extract_python_meta(root: &Path, meta: &mut ProjectMetadata) {
                         meta.description = Some(desc.to_string());
                     }
                 }
+                // CodePack: requires-python 环境信息
+                if let Some(rp) = project.get("requires-python").and_then(|v| v.as_str()) {
+                    meta.runtime.push(format!("python {}", rp));
+                }
+                // CodePack: 完整依赖清单（含版本）
                 if let Some(deps) = project.get("dependencies").and_then(|v| v.as_array()) {
-                    meta.dependencies = deps
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.split(&['>', '<', '=', '~', '!', ';'][..]).next().unwrap_or(s).trim().to_string())
-                        .collect();
+                    for dep in deps.iter().filter_map(|v| v.as_str()) {
+                        let name_only = dep.split(&['>', '<', '=', '~', '!', ';', '['][..]).next().unwrap_or(dep).trim().to_string();
+                        meta.dependencies.push(name_only);
+                        meta.requirements.push(dep.trim().to_string());
+                    }
                 }
             }
         }
@@ -469,11 +534,24 @@ fn extract_python_meta(root: &Path, meta: &mut ProjectMetadata) {
     // fallback: requirements.txt
     if meta.dependencies.is_empty() {
         if let Ok(content) = fs::read_to_string(root.join("requirements.txt")) {
-            meta.dependencies = content
-                .lines()
-                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-                .map(|l| l.split(&['>', '<', '=', '~', '!', ';'][..]).next().unwrap_or(l).trim().to_string())
-                .collect();
+            for line in content.lines() {
+                let l = line.trim();
+                if l.is_empty() || l.starts_with('#') || l.starts_with('-') {
+                    continue;
+                }
+                let name_only = l.split(&['>', '<', '=', '~', '!', ';', '['][..]).next().unwrap_or(l).trim().to_string();
+                meta.dependencies.push(name_only);
+                meta.requirements.push(l.to_string());
+            }
+        }
+    }
+    // CodePack: 检测 .python-version
+    if meta.runtime.is_empty() {
+        if let Ok(ver) = fs::read_to_string(root.join(".python-version")) {
+            let v = ver.trim().to_string();
+            if !v.is_empty() {
+                meta.runtime.push(format!("python {}", v));
+            }
         }
     }
     // 入口文件检测
@@ -493,10 +571,13 @@ fn extract_go_mod(root: &Path, meta: &mut ProjectMetadata) {
                 meta.name = trimmed.strip_prefix("module ").unwrap_or("").trim().to_string();
             }
             if trimmed.starts_with("go ") {
-                meta.version = Some(trimmed.strip_prefix("go ").unwrap_or("").trim().to_string());
+                let go_ver = trimmed.strip_prefix("go ").unwrap_or("").trim().to_string();
+                meta.version = Some(go_ver.clone());
+                // CodePack: Go 版本作为 runtime
+                meta.runtime.push(format!("go {}", go_ver));
             }
         }
-        // 提取 require 块中的依赖
+        // 提取 require 块中的依赖（含版本）
         let mut in_require = false;
         for line in content.lines() {
             let trimmed = line.trim();
@@ -509,8 +590,12 @@ fn extract_go_mod(root: &Path, meta: &mut ProjectMetadata) {
                 continue;
             }
             if in_require && !trimmed.is_empty() && !trimmed.starts_with("//") {
-                if let Some(dep) = trimmed.split_whitespace().next() {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if let Some(dep) = parts.first() {
                     meta.dependencies.push(dep.to_string());
+                }
+                if parts.len() >= 2 {
+                    meta.requirements.push(format!("{}@{}", parts[0], parts[1]));
                 }
             }
         }
@@ -525,12 +610,14 @@ fn extract_pubspec_yaml(root: &Path, meta: &mut ProjectMetadata) {
     if let Ok(content) = fs::read_to_string(root.join("pubspec.yaml")) {
         let mut in_deps = false;
         let mut in_dev_deps = false;
+        let mut in_environment = false;
         for line in content.lines() {
             let trimmed = line.trim();
             // 顶层 key
             if !line.starts_with(' ') && !line.starts_with('\t') {
                 in_deps = false;
                 in_dev_deps = false;
+                in_environment = false;
                 if trimmed.starts_with("name:") {
                     meta.name = trimmed.strip_prefix("name:").unwrap_or("").trim().to_string();
                 } else if trimmed.starts_with("version:") {
@@ -544,12 +631,29 @@ fn extract_pubspec_yaml(root: &Path, meta: &mut ProjectMetadata) {
                     in_deps = true;
                 } else if trimmed == "dev_dependencies:" {
                     in_dev_deps = true;
+                } else if trimmed == "environment:" {
+                    in_environment = true;
+                }
+            } else if in_environment && trimmed.contains(':') {
+                // CodePack: 提取 sdk/flutter 版本约束
+                let parts: Vec<&str> = trimmed.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    let key = parts[0].trim();
+                    let val = parts[1].trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        meta.runtime.push(format!("{} {}", key, val));
+                    }
                 }
             } else if (in_deps || in_dev_deps) && trimmed.contains(':') {
-                let dep_name = trimmed.split(':').next().unwrap_or("").trim().to_string();
+                let parts: Vec<&str> = trimmed.splitn(2, ':').collect();
+                let dep_name = parts[0].trim().to_string();
+                let dep_ver = parts.get(1).map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string()).unwrap_or_default();
                 if !dep_name.is_empty() && dep_name != "sdk" {
                     if in_deps {
-                        meta.dependencies.push(dep_name);
+                        meta.dependencies.push(dep_name.clone());
+                        if !dep_ver.is_empty() && dep_ver != "^" {
+                            meta.requirements.push(format!("{}@{}", dep_name, dep_ver));
+                        }
                     } else {
                         meta.dev_dependencies.push(dep_name);
                     }
@@ -577,8 +681,17 @@ fn extract_pom_xml(root: &Path, meta: &mut ProjectMetadata) {
                 meta.description = Some(desc);
             }
         }
-        // 提取 dependencies 中的 artifactId
+        // CodePack: 提取 java.version / maven.compiler.source
+        if let Some(jv) = extract_xml_tag(&content, "java.version") {
+            meta.runtime.push(format!("java {}", jv));
+        } else if let Some(jv) = extract_xml_tag(&content, "maven.compiler.source") {
+            meta.runtime.push(format!("java {}", jv));
+        }
+        // 提取 dependencies 中的 artifactId + version
         let mut in_deps = false;
+        let mut cur_group = String::new();
+        let mut cur_artifact = String::new();
+        let mut cur_version = String::new();
         for line in content.lines() {
             let trimmed = line.trim();
             if trimmed.contains("<dependencies>") {
@@ -588,8 +701,28 @@ fn extract_pom_xml(root: &Path, meta: &mut ProjectMetadata) {
                 in_deps = false;
             }
             if in_deps {
-                if let Some(dep) = extract_xml_tag(trimmed, "artifactId") {
-                    meta.dependencies.push(dep);
+                if let Some(v) = extract_xml_tag(trimmed, "groupId") {
+                    cur_group = v;
+                }
+                if let Some(v) = extract_xml_tag(trimmed, "artifactId") {
+                    cur_artifact = v;
+                }
+                if let Some(v) = extract_xml_tag(trimmed, "version") {
+                    cur_version = v;
+                }
+                if trimmed.contains("</dependency>") {
+                    if !cur_artifact.is_empty() {
+                        meta.dependencies.push(cur_artifact.clone());
+                        let req = if !cur_version.is_empty() {
+                            format!("{}:{}:{}", cur_group, cur_artifact, cur_version)
+                        } else {
+                            format!("{}:{}", cur_group, cur_artifact)
+                        };
+                        meta.requirements.push(req);
+                    }
+                    cur_group.clear();
+                    cur_artifact.clear();
+                    cur_version.clear();
                 }
             }
         }
@@ -763,11 +896,20 @@ fn build_pack_content(
     if let Some(ref entry) = meta.entry_point {
         header.push_str(&format!("# Entry Point: {}\n", entry));
     }
+    if !meta.runtime.is_empty() {
+        header.push_str(&format!("# Runtime: {}\n", meta.runtime.join(", ")));
+    }
     if !meta.dependencies.is_empty() {
         header.push_str(&format!("# Dependencies: {}\n", meta.dependencies.join(", ")));
     }
     if !meta.dev_dependencies.is_empty() {
         header.push_str(&format!("# Dev Dependencies: {}\n", meta.dev_dependencies.join(", ")));
+    }
+    if !meta.requirements.is_empty() {
+        header.push_str("# Requirements:\n");
+        for req in &meta.requirements {
+            header.push_str(&format!("#   {}\n", req));
+        }
     }
     header.push_str(&format!("# Files: {}\n", file_count));
     header.push_str(&format!("# Estimated Tokens: {}\n", format_tokens(estimated_tokens)));

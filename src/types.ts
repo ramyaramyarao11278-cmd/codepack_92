@@ -15,6 +15,8 @@ export interface ProjectMetadata {
   dependencies: string[];
   dev_dependencies: string[];
   entry_point: string | null;
+  runtime: string[];
+  requirements: string[];
 }
 
 export interface ScanResult {

@@ -561,20 +561,28 @@ watch(
 
     <!-- CodePack: 项目元数据信息栏 -->
     <div
-      v-if="projectMetadata && (projectMetadata.version || projectMetadata.dependencies.length > 0)"
+      v-if="projectMetadata && (projectMetadata.version || projectMetadata.runtime.length > 0 || projectMetadata.dependencies.length > 0)"
       class="flex items-center gap-4 px-5 py-1.5 border-b border-dark-700 bg-dark-900/80 text-xs text-dark-400 shrink-0 overflow-x-auto"
     >
       <span v-if="projectMetadata.version" class="flex items-center gap-1 shrink-0">
         <span class="text-dark-500">v</span>
         <span class="text-dark-300">{{ projectMetadata.version }}</span>
       </span>
+      <span v-if="projectMetadata.runtime.length > 0" class="flex items-center gap-1 shrink-0">
+        <span class="text-dark-500">环境</span>
+        <span class="text-amber-400/80">{{ projectMetadata.runtime.join(' · ') }}</span>
+      </span>
       <span v-if="projectMetadata.entry_point" class="flex items-center gap-1 shrink-0">
         <span class="text-dark-500">入口</span>
         <span class="text-emerald-400/70">{{ projectMetadata.entry_point }}</span>
       </span>
-      <span v-if="projectMetadata.dependencies.length > 0" class="flex items-center gap-1 truncate">
-        <span class="text-dark-500 shrink-0">依赖</span>
-        <span class="text-dark-300 truncate">{{ projectMetadata.dependencies.slice(0, 8).join(', ') }}<span v-if="projectMetadata.dependencies.length > 8" class="text-dark-500"> +{{ projectMetadata.dependencies.length - 8 }}</span></span>
+      <span v-if="projectMetadata.dependencies.length > 0" class="flex items-center gap-1 shrink-0">
+        <span class="text-dark-500">依赖</span>
+        <span class="text-dark-300">{{ projectMetadata.dependencies.length }}个</span>
+      </span>
+      <span v-if="projectMetadata.requirements.length > 0" class="flex items-center gap-1 truncate">
+        <span class="text-dark-500 shrink-0">清单</span>
+        <span class="text-sky-400/70 truncate">{{ projectMetadata.requirements.slice(0, 6).join(', ') }}<span v-if="projectMetadata.requirements.length > 6" class="text-dark-500"> +{{ projectMetadata.requirements.length - 6 }}</span></span>
       </span>
     </div>
 
