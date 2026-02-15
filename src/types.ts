@@ -37,6 +37,30 @@ export interface AppConfig {
   projects: Record<string, ProjectConfig>;
 }
 
+export interface PluginDef {
+  name: string;
+  version: string;
+  detect_files: string[];
+  detect_dirs: string[];
+  exclude_dirs: string[];
+  source_extensions: string[];
+}
+
+export interface LangStat {
+  language: string;
+  extension: string;
+  file_count: number;
+  line_count: number;
+  byte_count: number;
+}
+
+export interface ProjectStats {
+  total_files: number;
+  total_lines: number;
+  total_bytes: number;
+  languages: LangStat[];
+}
+
 // CodePack: pack_files 返回结构
 export interface PackResult {
   content: string;

@@ -1,20 +1,21 @@
-<!-- CodePack: 双模式预览组件（单文件预览 + 导出预览） -->
+<!-- CodePack: 三模式预览组件（单文件预览 + 导出预览 + 统计） -->
 <script setup lang="ts">
 import { computed } from "vue";
+import StatsPanel from "./StatsPanel.vue";
 
 const props = defineProps<{
   content: string;
   filePath: string;
   fileSize: number;
   isLoading: boolean;
-  // CodePack: 导出预览模式相关
-  activeTab: "file" | "export";
+  activeTab: "file" | "export" | "stats";
   exportContent: string;
   checkedCount: number;
+  checkedFiles: string[];
 }>();
 
 const emit = defineEmits<{
-  (e: "update:activeTab", tab: "file" | "export"): void;
+  (e: "update:activeTab", tab: "file" | "export" | "stats"): void;
 }>();
 
 const lines = computed(() => {
@@ -58,6 +59,15 @@ function formatSize(bytes: number): string {
         >
           导出预览
         </button>
+        <button
+          class="px-4 py-2 text-xs font-medium transition-colors border-b-2"
+          :class="activeTab === 'stats'
+            ? 'text-emerald-400 border-emerald-400 bg-dark-800/30'
+            : 'text-dark-500 border-transparent hover:text-dark-300'"
+          @click="emit('update:activeTab', 'stats')"
+        >
+          统计
+        </button>
       </div>
       <!-- CodePack: 右侧信息 -->
       <div class="pr-4 text-xs text-dark-500 truncate max-w-sm">
@@ -71,8 +81,13 @@ function formatSize(bytes: number): string {
       </div>
     </div>
 
+    <!-- CodePack: 统计面板 -->
+    <template v-if="activeTab === 'stats'">
+      <StatsPanel :checked-files="checkedFiles" :visible="activeTab === 'stats'" />
+    </template>
+
     <!-- CodePack: 单文件预览模式 -->
-    <template v-if="activeTab === 'file'">
+    <template v-else-if="activeTab === 'file'">
       <div v-if="isLoading" class="flex items-center justify-center flex-1">
         <div class="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
       </div>
@@ -102,7 +117,7 @@ function formatSize(bytes: number): string {
     </template>
 
     <!-- CodePack: 导出预览模式 -->
-    <template v-else>
+    <template v-else-if="activeTab === 'export'">
       <div
         v-if="checkedCount === 0"
         class="flex flex-col items-center justify-center flex-1 text-dark-600"

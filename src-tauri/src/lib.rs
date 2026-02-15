@@ -75,6 +75,78 @@ pub struct ProjectMetadata {
     pub entry_point: Option<String>,
 }
 
+// ─── Plugin System ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginDef {
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub detect_files: Vec<String>,
+    #[serde(default)]
+    pub detect_dirs: Vec<String>,
+    #[serde(default)]
+    pub exclude_dirs: Vec<String>,
+    #[serde(default)]
+    pub source_extensions: Vec<String>,
+}
+
+fn get_plugins_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("codepack")
+        .join("plugins")
+}
+
+fn load_plugins() -> Vec<PluginDef> {
+    let dir = get_plugins_dir();
+    if !dir.exists() {
+        return Vec::new();
+    }
+    let mut plugins = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(plugin) = serde_json::from_str::<PluginDef>(&content) {
+                        plugins.push(plugin);
+                    }
+                }
+            }
+        }
+    }
+    plugins
+}
+
+fn plugin_matches(plugin: &PluginDef, root: &Path) -> bool {
+    let files_match = plugin.detect_files.is_empty()
+        || plugin.detect_files.iter().all(|f| root.join(f).exists());
+    let dirs_match = plugin.detect_dirs.is_empty()
+        || plugin.detect_dirs.iter().all(|d| root.join(d).is_dir());
+    // At least one detect rule must be non-empty
+    (!plugin.detect_files.is_empty() || !plugin.detect_dirs.is_empty())
+        && files_match
+        && dirs_match
+}
+
+// CodePack: 收集所有插件的额外排除目录
+fn get_plugin_excluded_dirs(plugins: &[PluginDef]) -> Vec<String> {
+    plugins
+        .iter()
+        .flat_map(|p| p.exclude_dirs.iter().cloned())
+        .collect()
+}
+
+// CodePack: 收集所有插件的额外源码扩展名
+fn get_plugin_source_extensions(plugins: &[PluginDef]) -> Vec<String> {
+    plugins
+        .iter()
+        .flat_map(|p| p.source_extensions.iter().cloned())
+        .collect()
+}
+
 // ─── Constants ─────────────────────────────────────────────────
 
 const EXCLUDED_DIRS: &[&str] = &[
@@ -152,13 +224,12 @@ fn save_app_config(config: &AppConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn is_excluded_dir(name: &str) -> bool {
-    EXCLUDED_DIRS.iter().any(|&excluded| {
-        name.eq_ignore_ascii_case(excluded)
-    })
+fn is_excluded_dir(name: &str, extra_excludes: &[String]) -> bool {
+    EXCLUDED_DIRS.iter().any(|&excluded| name.eq_ignore_ascii_case(excluded))
+        || extra_excludes.iter().any(|excluded| name.eq_ignore_ascii_case(excluded))
 }
 
-fn is_source_file(name: &str) -> bool {
+fn is_source_file(name: &str, extra_extensions: &[String]) -> bool {
     let lower = name.to_lowercase();
     if matches!(
         lower.as_str(),
@@ -169,9 +240,21 @@ fn is_source_file(name: &str) -> bool {
     }
     if let Some(ext) = Path::new(name).extension().and_then(|e| e.to_str()) {
         SOURCE_EXTENSIONS.iter().any(|&se| se.eq_ignore_ascii_case(ext))
+            || extra_extensions.iter().any(|se| se.eq_ignore_ascii_case(ext))
     } else {
         false
     }
+}
+
+// CodePack: 带插件支持的项目类型识别
+fn detect_project_type_with_plugins(root: &Path, plugins: &[PluginDef]) -> String {
+    // 插件优先匹配
+    for plugin in plugins {
+        if plugin_matches(plugin, root) {
+            return plugin.name.clone();
+        }
+    }
+    detect_project_type(root)
 }
 
 // CodePack: 增强的项目类型识别，支持 15+ 种项目类型
@@ -550,7 +633,7 @@ fn extract_xml_tag(text: &str, tag: &str) -> Option<String> {
     None
 }
 
-fn build_file_tree(root: &Path) -> FileNode {
+fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions: &[String]) -> FileNode {
     let root_name = root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -564,12 +647,12 @@ fn build_file_tree(root: &Path) -> FileNode {
         checked: true,
     };
 
-    build_tree_recursive(root, &mut root_node);
+    build_tree_recursive(root, &mut root_node, extra_excludes, extra_extensions);
     sort_tree(&mut root_node);
     root_node
 }
 
-fn build_tree_recursive(dir: &Path, parent: &mut FileNode) {
+fn build_tree_recursive(dir: &Path, parent: &mut FileNode, extra_excludes: &[String], extra_extensions: &[String]) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
@@ -583,7 +666,7 @@ fn build_tree_recursive(dir: &Path, parent: &mut FileNode) {
         let name = entry.file_name().to_string_lossy().to_string();
 
         if path.is_dir() {
-            if is_excluded_dir(&name) {
+            if is_excluded_dir(&name, extra_excludes) {
                 continue;
             }
             let mut dir_node = FileNode {
@@ -593,11 +676,11 @@ fn build_tree_recursive(dir: &Path, parent: &mut FileNode) {
                 children: Vec::new(),
                 checked: true,
             };
-            build_tree_recursive(&path, &mut dir_node);
+            build_tree_recursive(&path, &mut dir_node, extra_excludes, extra_extensions);
             if !dir_node.children.is_empty() {
                 parent.children.push(dir_node);
             }
-        } else if is_source_file(&name) {
+        } else if is_source_file(&name, extra_extensions) {
             parent.children.push(FileNode {
                 name,
                 path: path.to_string_lossy().to_string(),
@@ -719,8 +802,12 @@ fn scan_directory(path: String) -> Result<ScanResult, String> {
         return Err("Path does not exist or is not a directory".to_string());
     }
 
-    let project_type = detect_project_type(root);
-    let tree = build_file_tree(root);
+    // CodePack: 加载插件，用于项目类型识别和文件过滤
+    let plugins = load_plugins();
+    let project_type = detect_project_type_with_plugins(root, &plugins);
+    let extra_excludes = get_plugin_excluded_dirs(&plugins);
+    let extra_extensions = get_plugin_source_extensions(&plugins);
+    let tree = build_file_tree(root, &extra_excludes, &extra_extensions);
     let total_files = count_files(&tree);
     let metadata = extract_metadata(root, &project_type);
 
@@ -903,6 +990,142 @@ fn list_presets(project_path: String) -> Result<HashMap<String, Vec<String>>, St
         .unwrap_or_default())
 }
 
+// CodePack: 插件管理命令
+#[tauri::command]
+fn list_plugins() -> Result<Vec<PluginDef>, String> {
+    Ok(load_plugins())
+}
+
+#[tauri::command]
+fn save_plugin(plugin: PluginDef) -> Result<(), String> {
+    let dir = get_plugins_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let filename = plugin.name.to_lowercase().replace(' ', "-") + ".json";
+    let path = dir.join(filename);
+    let json = serde_json::to_string_pretty(&plugin).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_plugin(name: String) -> Result<(), String> {
+    let dir = get_plugins_dir();
+    let filename = name.to_lowercase().replace(' ', "-") + ".json";
+    let path = dir.join(&filename);
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// CodePack: 项目统计数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangStat {
+    pub language: String,
+    pub extension: String,
+    pub file_count: u32,
+    pub line_count: u64,
+    pub byte_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectStats {
+    pub total_files: u32,
+    pub total_lines: u64,
+    pub total_bytes: u64,
+    pub languages: Vec<LangStat>,
+}
+
+fn ext_to_language(ext: &str) -> &str {
+    match ext.to_lowercase().as_str() {
+        "rs" => "Rust",
+        "ts" | "tsx" => "TypeScript",
+        "js" | "jsx" => "JavaScript",
+        "vue" => "Vue",
+        "svelte" => "Svelte",
+        "py" => "Python",
+        "kt" | "kts" => "Kotlin",
+        "java" => "Java",
+        "dart" => "Dart",
+        "go" => "Go",
+        "rb" => "Ruby",
+        "php" => "PHP",
+        "swift" => "Swift",
+        "c" => "C",
+        "cpp" | "cc" | "cxx" => "C++",
+        "h" | "hpp" => "C/C++ Header",
+        "cs" => "C#",
+        "scala" => "Scala",
+        "html" => "HTML",
+        "css" => "CSS",
+        "scss" | "sass" | "less" => "CSS (preprocessor)",
+        "json" => "JSON",
+        "yaml" | "yml" => "YAML",
+        "toml" => "TOML",
+        "xml" => "XML",
+        "md" | "mdx" => "Markdown",
+        "sql" => "SQL",
+        "sh" | "bash" | "zsh" | "fish" => "Shell",
+        "bat" | "ps1" => "PowerShell/Batch",
+        "graphql" | "gql" => "GraphQL",
+        "proto" => "Protobuf",
+        "tf" | "hcl" => "Terraform/HCL",
+        "lua" => "Lua",
+        "r" => "R",
+        "jl" => "Julia",
+        _ => ext,
+    }
+}
+
+#[tauri::command]
+fn get_project_stats(paths: Vec<String>) -> Result<ProjectStats, String> {
+    let mut lang_map: HashMap<String, (String, u32, u64, u64)> = HashMap::new();
+    let mut total_files: u32 = 0;
+    let mut total_lines: u64 = 0;
+    let mut total_bytes: u64 = 0;
+
+    for path in &paths {
+        if let Ok(content) = fs::read_to_string(path) {
+            let bytes = content.len() as u64;
+            let lines = content.lines().count() as u64;
+            total_files += 1;
+            total_lines += lines;
+            total_bytes += bytes;
+
+            let ext = Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("other")
+                .to_lowercase();
+            let lang = ext_to_language(&ext).to_string();
+
+            let entry = lang_map.entry(lang.clone()).or_insert((ext.clone(), 0, 0, 0));
+            entry.1 += 1;
+            entry.2 += lines;
+            entry.3 += bytes;
+        }
+    }
+
+    let mut languages: Vec<LangStat> = lang_map
+        .into_iter()
+        .map(|(lang, (ext, fc, lc, bc))| LangStat {
+            language: lang,
+            extension: ext,
+            file_count: fc,
+            line_count: lc,
+            byte_count: bc,
+        })
+        .collect();
+    languages.sort_by(|a, b| b.line_count.cmp(&a.line_count));
+
+    Ok(ProjectStats {
+        total_files,
+        total_lines,
+        total_bytes,
+        languages,
+    })
+}
+
 fn chrono_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let duration = SystemTime::now()
@@ -932,6 +1155,10 @@ pub fn run() {
             save_preset,
             delete_preset,
             list_presets,
+            list_plugins,
+            save_plugin,
+            delete_plugin,
+            get_project_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

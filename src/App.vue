@@ -22,7 +22,7 @@ const previewContent = ref<string>("");
 const isLoading = ref(false);
 const isScanning = ref(false);
 // CodePack: 预览模式 tab 状态
-const previewTab = ref<"file" | "export">("file");
+const previewTab = ref<"file" | "export" | "stats">("file");
 const exportPreviewContent = ref<string>("");
 const selectedFileSize = ref<number>(0);
 // CodePack: 按钮成功状态
@@ -418,6 +418,7 @@ watch(previewTab, (tab) => {
   if (tab === "export" && !exportPreviewContent.value && checkedFiles.value.length > 0) {
     refreshExportPreview();
   }
+  // stats tab 由 StatsPanel 组件内部 watch 处理
 });
 
 // CodePack: 右键菜单操作处理
@@ -696,6 +697,7 @@ watch(
           :active-tab="previewTab"
           :export-content="exportPreviewContent"
           :checked-count="checkedFiles.length"
+          :checked-files="checkedFiles"
           @update:active-tab="previewTab = $event"
         />
       </div>
