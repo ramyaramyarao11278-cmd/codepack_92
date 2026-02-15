@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -62,9 +63,22 @@ pub fn build_pack_content(
     }
 
     let estimated_tokens = total_bytes as f64 / 4.0;
+
+    // Collect relative paths for tree overview
+    let relative_paths: Vec<String> = paths
+        .iter()
+        .filter_map(|p| {
+            Path::new(p)
+                .strip_prefix(root)
+                .ok()
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+        })
+        .collect();
+
     let header = build_header(&meta, file_count, estimated_tokens, format);
+    let tree_overview = build_tree_overview(&relative_paths, format);
     let footer = build_footer(format);
-    let content = format!("{}{}{}", header, body, footer);
+    let content = format!("{}{}{}{}", header, tree_overview, body, footer);
 
     PackResult {
         content,
@@ -191,6 +205,92 @@ fn build_xml_header(meta: &ProjectMetadata, file_count: u32, estimated_tokens: f
     h
 }
 
+// ─── File Tree Overview ────────────────────────────────────────
+
+#[derive(Default)]
+struct TreeNode {
+    children: BTreeMap<String, TreeNode>,
+}
+
+fn build_tree_overview(relative_paths: &[String], format: &ExportFormat) -> String {
+    if relative_paths.is_empty() {
+        return String::new();
+    }
+
+    // Build a nested tree from flat paths
+    let mut root = TreeNode::default();
+    for path in relative_paths {
+        let mut current = &mut root;
+        for part in path.split('/') {
+            current = current.children.entry(part.to_string()).or_default();
+        }
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    render_tree_node(&root, "", true, &mut lines);
+
+    match format {
+        ExportFormat::Plain => {
+            let mut out = String::from("# File Tree:\n");
+            for line in &lines {
+                out.push_str(&format!("#   {}\n", line));
+            }
+            out.push_str("#\n\n");
+            out
+        }
+        ExportFormat::Markdown => {
+            let mut out = String::from("## File Tree\n\n```\n");
+            for line in &lines {
+                out.push_str(line);
+                out.push('\n');
+            }
+            out.push_str("```\n\n");
+            out
+        }
+        ExportFormat::Xml => {
+            let mut out = String::from("<file_tree>\n<![CDATA[\n");
+            for line in &lines {
+                out.push_str(line);
+                out.push('\n');
+            }
+            out.push_str("]]>\n</file_tree>\n\n");
+            out
+        }
+    }
+}
+
+fn render_tree_node(node: &TreeNode, prefix: &str, is_root: bool, lines: &mut Vec<String>) {
+    let entries: Vec<_> = node.children.iter().collect();
+    let count = entries.len();
+    for (i, (name, child)) in entries.iter().enumerate() {
+        let is_last = i == count - 1;
+        if is_root {
+            // Top-level entries have no connector
+            let has_children = !child.children.is_empty();
+            if has_children {
+                lines.push(format!("{}/", name));
+                render_tree_node(child, "  ", false, lines);
+            } else {
+                lines.push(name.to_string());
+            }
+        } else {
+            let connector = if is_last { "└── " } else { "├── " };
+            let has_children = !child.children.is_empty();
+            if has_children {
+                lines.push(format!("{}{}{}/", prefix, connector, name));
+                let child_prefix = if is_last {
+                    format!("{}    ", prefix)
+                } else {
+                    format!("{}│   ", prefix)
+                };
+                render_tree_node(child, &child_prefix, false, lines);
+            } else {
+                lines.push(format!("{}{}{}", prefix, connector, name));
+            }
+        }
+    }
+}
+
 fn build_footer(format: &ExportFormat) -> String {
     match format {
         ExportFormat::Xml => "</files>\n</codepack>\n".to_string(),
@@ -305,5 +405,62 @@ mod tests {
         assert_eq!(format_tokens(500.0), "500");
         assert_eq!(format_tokens(1500.0), "1.5K");
         assert_eq!(format_tokens(1_500_000.0), "1.5M");
+    }
+
+    #[test]
+    fn test_tree_overview_plain() {
+        let paths = vec![
+            "src/main.rs".to_string(),
+            "src/lib.rs".to_string(),
+            "Cargo.toml".to_string(),
+        ];
+        let overview = build_tree_overview(&paths, &ExportFormat::Plain);
+        assert!(overview.contains("# File Tree:"));
+        assert!(overview.contains("src/"));
+        assert!(overview.contains("main.rs"));
+        assert!(overview.contains("lib.rs"));
+        assert!(overview.contains("Cargo.toml"));
+    }
+
+    #[test]
+    fn test_tree_overview_markdown() {
+        let paths = vec![
+            "src/main.rs".to_string(),
+            "README.md".to_string(),
+        ];
+        let overview = build_tree_overview(&paths, &ExportFormat::Markdown);
+        assert!(overview.contains("## File Tree"));
+        assert!(overview.contains("```"));
+        assert!(overview.contains("src/"));
+        assert!(overview.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_tree_overview_xml() {
+        let paths = vec!["main.rs".to_string()];
+        let overview = build_tree_overview(&paths, &ExportFormat::Xml);
+        assert!(overview.contains("<file_tree>"));
+        assert!(overview.contains("main.rs"));
+        assert!(overview.contains("</file_tree>"));
+    }
+
+    #[test]
+    fn test_tree_overview_empty() {
+        let paths: Vec<String> = vec![];
+        let overview = build_tree_overview(&paths, &ExportFormat::Plain);
+        assert!(overview.is_empty());
+    }
+
+    #[test]
+    fn test_export_contains_tree() {
+        let dir = setup_test_project();
+        let paths = vec![
+            dir.path().join("main.rs").to_string_lossy().to_string(),
+            dir.path().join("style.css").to_string_lossy().to_string(),
+        ];
+        let result = build_pack_content(&paths, &dir.path().to_string_lossy(), "Rust", &ExportFormat::Markdown);
+        // Should contain both the file tree overview and the actual file content
+        assert!(result.content.contains("## File Tree"));
+        assert!(result.content.contains("## main.rs"));
     }
 }
