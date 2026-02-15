@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod stats;
 pub mod packer;
 pub mod git;
+pub mod watcher;
 pub mod commands;
 
 use commands::*;
@@ -15,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(watcher::WatcherState::new())
         .invoke_handler(tauri::generate_handler![
             scan_directory,
             scan_directory_async,
@@ -37,6 +39,8 @@ pub fn run() {
             save_exclude_rules,
             load_exclude_rules,
             get_git_status_cmd,
+            start_watching_cmd,
+            stop_watching_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

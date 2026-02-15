@@ -38,6 +38,10 @@ export const useProjectStore = defineStore("project", () => {
   // ─── Git State ─────────────────────────────────────────────
   const gitStatus = ref<GitStatus | null>(null);
 
+  // ─── File Watcher ──────────────────────────────────────────
+  let unlistenFsChanged: (() => void) | null = null;
+  let fsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ─── Shared Collapse State ───────────────────────────────────
   const collapsedState = reactive<Record<string, boolean>>({});
 
@@ -132,6 +136,8 @@ export const useProjectStore = defineStore("project", () => {
       exportPreviewContent.value = "";
       await loadPresets();
       fetchGitStatus();
+      // Start file watcher
+      await startWatching(path);
     } catch (e) {
       toast.show({ type: "error", message: `扫描失败: ${e}` });
     } finally {
@@ -381,7 +387,43 @@ export const useProjectStore = defineStore("project", () => {
     onTreeChanged();
   }
 
-  function closeProject() {
+  async function startWatching(path: string) {
+    // Stop previous watcher
+    await stopWatching();
+    try {
+      await invoke("start_watching_cmd", { projectPath: path });
+      unlistenFsChanged = await listen<string>("fs-changed", () => {
+        // Debounce: wait 1s after last change before refreshing
+        if (fsDebounceTimer) clearTimeout(fsDebounceTimer);
+        fsDebounceTimer = setTimeout(() => {
+          if (fileTree.value && !isRefreshing.value) {
+            refreshFileTree();
+          }
+        }, 1000);
+      }) as unknown as () => void;
+    } catch {
+      // Watcher is optional, don't block on failure
+    }
+  }
+
+  async function stopWatching() {
+    if (fsDebounceTimer) {
+      clearTimeout(fsDebounceTimer);
+      fsDebounceTimer = null;
+    }
+    if (unlistenFsChanged) {
+      unlistenFsChanged();
+      unlistenFsChanged = null;
+    }
+    try {
+      await invoke("stop_watching_cmd");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function closeProject() {
+    await stopWatching();
     fileTree.value = null;
     projectPath.value = "";
     projectType.value = "";

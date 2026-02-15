@@ -354,6 +354,18 @@ pub fn get_git_status_cmd(project_path: String) -> Result<Option<crate::git::Git
     Ok(crate::git::get_git_status(&project_path))
 }
 
+// ─── Watcher Commands ──────────────────────────────────────────
+
+#[tauri::command]
+pub fn start_watching_cmd(app: tauri::AppHandle, project_path: String) -> Result<(), String> {
+    crate::watcher::start_watching(&app, &project_path)
+}
+
+#[tauri::command]
+pub fn stop_watching_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    crate::watcher::stop_watching(&app)
+}
+
 // ─── Stats Command ─────────────────────────────────────────────
 
 #[tauri::command]
