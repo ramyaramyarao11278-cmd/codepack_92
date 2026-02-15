@@ -6,7 +6,9 @@ use std::sync::LazyLock;
 use tiktoken_rs::CoreBPE;
 
 use crate::metadata::extract_metadata;
-use crate::types::{ExportFormat, PackResult, ProjectMetadata};
+use crate::types::{ExportFormat, PackResult, ProjectMetadata, SkippedFile};
+
+const DEFAULT_MAX_FILE_BYTES: u64 = 1_048_576; // 1 MB
 
 static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
     tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
@@ -18,12 +20,24 @@ pub fn build_pack_content(
     project_type: &str,
     format: &ExportFormat,
 ) -> PackResult {
+    build_pack_content_with_limit(paths, project_path, project_type, format, None)
+}
+
+pub fn build_pack_content_with_limit(
+    paths: &[String],
+    project_path: &str,
+    project_type: &str,
+    format: &ExportFormat,
+    max_file_bytes: Option<u64>,
+) -> PackResult {
     let root = Path::new(project_path);
     let meta = extract_metadata(root, project_type);
+    let limit = max_file_bytes.unwrap_or(DEFAULT_MAX_FILE_BYTES);
 
     let mut body = String::new();
     let mut file_count: u32 = 0;
     let mut total_bytes: u64 = 0;
+    let mut skipped_files: Vec<SkippedFile> = Vec::new();
 
     for path in paths {
         let file_path = Path::new(path);
@@ -32,6 +46,39 @@ pub fn build_pack_content(
             .unwrap_or(file_path)
             .to_string_lossy()
             .replace('\\', "/");
+
+        // Check file size before reading
+        let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if file_size > limit {
+            skipped_files.push(SkippedFile {
+                path: relative.clone(),
+                reason: format!("exceeds {}KB limit ({}KB)", limit / 1024, file_size / 1024),
+                size_bytes: file_size,
+            });
+            // Insert a placeholder in the output
+            match format {
+                ExportFormat::Plain => {
+                    let comment = comment_delimiter(&relative);
+                    body.push_str(&format!(
+                        "{} ===== {} [SKIPPED: {}KB > {}KB limit] =====\n\n",
+                        comment, relative, file_size / 1024, limit / 1024
+                    ));
+                }
+                ExportFormat::Markdown => {
+                    body.push_str(&format!(
+                        "## {} *(skipped: {}KB > {}KB limit)*\n\n",
+                        relative, file_size / 1024, limit / 1024
+                    ));
+                }
+                ExportFormat::Xml => {
+                    body.push_str(&format!(
+                        "<file path=\"{}\" skipped=\"true\" size_kb=\"{}\" />\n\n",
+                        xml_escape(&relative), file_size / 1024
+                    ));
+                }
+            }
+            continue;
+        }
 
         if let Ok(content) = fs::read_to_string(path) {
             total_bytes += content.len() as u64;
@@ -92,6 +139,7 @@ pub fn build_pack_content(
         file_count,
         total_bytes,
         estimated_tokens,
+        skipped_files,
     }
 }
 
@@ -456,6 +504,44 @@ mod tests {
         let paths: Vec<String> = vec![];
         let overview = build_tree_overview(&paths, &ExportFormat::Plain);
         assert!(overview.is_empty());
+    }
+
+    #[test]
+    fn test_large_file_skipped() {
+        let dir = TempDir::new().unwrap();
+        // Create a small file and a "large" file (>50 bytes with a 50-byte limit)
+        fs::write(dir.path().join("small.rs"), "fn main() {}").unwrap();
+        let large_content = "x".repeat(200);
+        fs::write(dir.path().join("big.rs"), &large_content).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\n").unwrap();
+
+        let paths = vec![
+            dir.path().join("small.rs").to_string_lossy().to_string(),
+            dir.path().join("big.rs").to_string_lossy().to_string(),
+        ];
+        let result = build_pack_content_with_limit(
+            &paths, &dir.path().to_string_lossy(), "Rust", &ExportFormat::Plain, Some(100),
+        );
+        // small.rs should be included, big.rs should be skipped
+        assert_eq!(result.file_count, 1);
+        assert_eq!(result.skipped_files.len(), 1);
+        assert!(result.skipped_files[0].path.contains("big.rs"));
+        assert!(result.content.contains("SKIPPED"));
+        assert!(result.content.contains("small.rs"));
+    }
+
+    #[test]
+    fn test_no_skip_when_limit_high() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\n").unwrap();
+
+        let paths = vec![dir.path().join("main.rs").to_string_lossy().to_string()];
+        let result = build_pack_content_with_limit(
+            &paths, &dir.path().to_string_lossy(), "Rust", &ExportFormat::Plain, Some(10_000_000),
+        );
+        assert_eq!(result.file_count, 1);
+        assert!(result.skipped_files.is_empty());
     }
 
     #[test]

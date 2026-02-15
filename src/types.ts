@@ -65,12 +65,19 @@ export interface ProjectStats {
 
 export type ExportFormat = "plain" | "markdown" | "xml";
 
+export interface SkippedFile {
+  path: string;
+  reason: string;
+  size_bytes: number;
+}
+
 // CodePack: pack_files 返回结构
 export interface PackResult {
   content: string;
   file_count: number;
   total_bytes: number;
   estimated_tokens: number;
+  skipped_files: SkippedFile[];
 }
 
 // CodePack: estimate_tokens 返回结构

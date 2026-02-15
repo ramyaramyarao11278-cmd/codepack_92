@@ -7,7 +7,7 @@ use tiktoken_rs::CoreBPE;
 
 use crate::config::{chrono_now, load_app_config, save_app_config};
 use crate::metadata::extract_metadata;
-use crate::packer::build_pack_content;
+use crate::packer::build_pack_content_with_limit;
 
 static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
     tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
@@ -99,10 +99,11 @@ pub fn pack_files(
     paths: Vec<String>,
     project_path: String,
     project_type: String,
-    #[allow(unused_variables)] format: Option<ExportFormat>,
+    format: Option<ExportFormat>,
+    max_file_bytes: Option<u64>,
 ) -> Result<PackResult, String> {
     let fmt = format.unwrap_or_default();
-    Ok(build_pack_content(&paths, &project_path, &project_type, &fmt))
+    Ok(build_pack_content_with_limit(&paths, &project_path, &project_type, &fmt, max_file_bytes))
 }
 
 #[tauri::command]
@@ -119,10 +120,11 @@ pub fn export_to_file(
     project_path: String,
     project_type: String,
     save_path: String,
-    #[allow(unused_variables)] format: Option<ExportFormat>,
+    format: Option<ExportFormat>,
+    max_file_bytes: Option<u64>,
 ) -> Result<String, String> {
     let fmt = format.unwrap_or_default();
-    let result = build_pack_content(&paths, &project_path, &project_type, &fmt);
+    let result = build_pack_content_with_limit(&paths, &project_path, &project_type, &fmt, max_file_bytes);
     fs::write(&save_path, &result.content)
         .map_err(|e| format!("Failed to export: {}", e))?;
     Ok(save_path)

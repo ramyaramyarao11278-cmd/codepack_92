@@ -69,10 +69,18 @@ async function onCopyToClipboard() {
       projectPath: project.projectPath,
       projectType: project.projectType,
       format: ui.exportFormat,
+      maxFileBytes: ui.maxFileKB * 1024,
     });
     await invoke("copy_to_clipboard", { content: result.content });
     ui.copySuccess = true;
     setTimeout(() => (ui.copySuccess = false), 2000);
+    if (result.skipped_files && result.skipped_files.length > 0) {
+      toast.show({
+        type: "info",
+        message: `跳过了 ${result.skipped_files.length} 个超大文件（>${ui.maxFileKB}KB）`,
+        duration: 4000,
+      });
+    }
     toast.show({
       type: "success",
       message: `已复制 ${result.file_count} 个文件到剪贴板（${formatTokens(result.estimated_tokens)} tokens）`,
@@ -110,6 +118,7 @@ async function onExportToFile() {
       projectType: project.projectType,
       savePath,
       format: ui.exportFormat,
+      maxFileBytes: ui.maxFileKB * 1024,
     });
     ui.exportSuccess = true;
     setTimeout(() => (ui.exportSuccess = false), 2000);
@@ -147,7 +156,7 @@ function onCloseProject() {
 // CodePack: 切换到导出预览 tab 或格式变化时自动刷新
 watch([() => ui.previewTab, () => ui.exportFormat], ([tab, _fmt]) => {
   if (tab === "export" && project.checkedFiles.length > 0) {
-    project.refreshExportPreview(ui.exportFormat);
+    project.refreshExportPreview(ui.exportFormat, ui.maxFileKB * 1024);
   }
 });
 

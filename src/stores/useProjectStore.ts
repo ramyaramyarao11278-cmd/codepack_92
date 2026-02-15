@@ -236,13 +236,14 @@ export const useProjectStore = defineStore("project", () => {
   }
 
   // ─── Export ──────────────────────────────────────────────────
-  async function refreshExportPreview(format: ExportFormat = "plain") {
+  async function refreshExportPreview(format: ExportFormat = "plain", maxFileBytes?: number) {
     if (!fileTree.value) return;
     const paths = getAllCheckedFiles(fileTree.value);
     if (paths.length === 0) { exportPreviewContent.value = ""; return; }
     try {
       const result = await invoke<PackResult>("pack_files", {
         paths, projectPath: projectPath.value, projectType: projectType.value, format,
+        ...(maxFileBytes != null ? { maxFileBytes } : {}),
       });
       exportPreviewContent.value = result.content;
     } catch {

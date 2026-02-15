@@ -11,6 +11,7 @@ export const useUIStore = defineStore("ui", () => {
   const copySuccess = ref(false);
   const exportSuccess = ref(false);
   const exportFormat = ref<ExportFormat>("plain");
+  const maxFileKB = ref(1024); // 1MB default, in KB
 
   function resetPresetUI() {
     showPresetInput.value = false;
@@ -20,7 +21,7 @@ export const useUIStore = defineStore("ui", () => {
   return {
     previewTab, isDragging, showSettings,
     showPresetInput, newPresetName,
-    copySuccess, exportSuccess, exportFormat,
+    copySuccess, exportSuccess, exportFormat, maxFileKB,
     resetPresetUI,
   };
 });

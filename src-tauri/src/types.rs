@@ -54,6 +54,15 @@ pub struct PackResult {
     pub file_count: u32,
     pub total_bytes: u64,
     pub estimated_tokens: f64,
+    #[serde(default)]
+    pub skipped_files: Vec<SkippedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedFile {
+    pub path: String,
+    pub reason: String,
+    pub size_bytes: u64,
 }
 
 // CodePack: estimate_tokens 返回结构，附带文件大小
