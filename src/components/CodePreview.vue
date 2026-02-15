@@ -15,15 +15,17 @@ const props = defineProps<{
   filePath: string;
   fileSize: number;
   isLoading: boolean;
-  activeTab: "file" | "export" | "stats";
+  activeTab: "file" | "export" | "stats" | "review";
   exportContent: string;
   checkedCount: number;
   checkedFiles: string[];
   secrets?: SecretMatch[];
+  reviewContent?: string;
+  isReviewing?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "update:activeTab", tab: "file" | "export" | "stats"): void;
+  (e: "update:activeTab", tab: "file" | "export" | "stats" | "review"): void;
   (e: "update:exportContent", content: string): void;
   (e: "mask-secrets"): void;
   (e: "exclude-file"): void;
@@ -122,6 +124,16 @@ function formatSize(bytes: number): string {
           @click="emit('update:activeTab', 'stats')"
         >
           统计
+        </button>
+        <button
+          class="px-4 py-2 text-xs font-medium transition-colors border-b-2"
+          :class="activeTab === 'review'
+            ? 'text-violet-400 border-violet-400 bg-dark-800/30'
+            : 'text-dark-500 border-transparent hover:text-dark-300'"
+          @click="emit('update:activeTab', 'review')"
+        >
+          <span v-if="isReviewing" class="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse mr-1"></span>
+          AI Review
         </button>
       </div>
       <!-- CodePack: 右侧信息 -->
@@ -258,6 +270,33 @@ function formatSize(bytes: number): string {
             </tr>
           </tbody>
         </table>
+      </div>
+    </template>
+
+    <!-- CodePack: AI Review 结果面板 -->
+    <template v-else-if="activeTab === 'review'">
+      <div v-if="!reviewContent && !isReviewing" class="flex flex-col items-center justify-center flex-1 text-dark-600">
+        <svg class="w-16 h-16 mb-4 text-dark-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+        <p class="text-sm mb-2">点击底部 <span class="text-violet-400 font-medium">Start Review</span> 开始 AI 审查</p>
+        <p class="text-xs text-dark-700">选择一个 Reviewer 角色可获得更精准的审查结果</p>
+      </div>
+
+      <div v-else-if="isReviewing && !reviewContent" class="flex flex-col items-center justify-center flex-1 text-dark-500">
+        <div class="w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full animate-spin mb-4" />
+        <p class="text-sm">AI 正在审查你的代码...</p>
+        <p class="text-xs text-dark-600 mt-1">结果将以流式方式实时显示</p>
+      </div>
+
+      <div v-else class="flex-1 overflow-auto">
+        <div class="p-5 prose prose-invert prose-sm max-w-none review-content">
+          <div v-if="isReviewing" class="flex items-center gap-2 mb-3 text-xs text-violet-400">
+            <div class="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+            正在接收...
+          </div>
+          <div class="whitespace-pre-wrap text-sm text-dark-200 leading-relaxed font-sans" v-text="reviewContent" />
+        </div>
       </div>
     </template>
   </div>

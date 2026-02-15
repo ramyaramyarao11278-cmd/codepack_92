@@ -128,6 +128,27 @@ pub struct ScanProgress {
     pub message: String,
 }
 
+// CodePack: AI API 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiConfig {
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+    #[serde(default)]
+    pub base_url: String,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            provider: "deepseek".to_string(),
+            model: "deepseek-chat".to_string(),
+            api_key: String::new(),
+            base_url: String::new(),
+        }
+    }
+}
+
 // CodePack: 项目统计数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LangStat {

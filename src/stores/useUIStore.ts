@@ -3,7 +3,7 @@ import { ref } from "vue";
 import type { ExportFormat } from "../types";
 
 export const useUIStore = defineStore("ui", () => {
-  const previewTab = ref<"file" | "export" | "stats">("file");
+  const previewTab = ref<"file" | "export" | "stats" | "review">("file");
   const isDragging = ref(false);
   const showSettings = ref(false);
   const showPresetInput = ref(false);

@@ -286,6 +286,32 @@ function onCloseProject() {
   ui.changedOnly = false;
 }
 
+async function onStartReview() {
+  if (!project.fileTree || project.checkedFiles.length === 0) {
+    toast.show({ type: "info", message: "请先选择要 Review 的文件" });
+    return;
+  }
+  // Pack the content first, then send to AI
+  const useExtended = ui.includeDiff || !!project.activeInstruction;
+  const packCmd = useExtended ? "pack_files_extended" : "pack_files";
+  const packArgs: Record<string, unknown> = {
+    paths: project.checkedFiles,
+    projectPath: project.projectPath,
+    projectType: project.projectType,
+    format: ui.exportFormat,
+    maxFileBytes: ui.maxFileKB * 1024,
+  };
+  if (ui.includeDiff) packArgs.includeDiff = true;
+  if (project.activeInstruction) packArgs.instruction = project.activeInstruction;
+  try {
+    const result = await invoke<PackResult>(packCmd, packArgs);
+    ui.previewTab = "review";
+    await project.startReview(result.content);
+  } catch (e) {
+    toast.show({ type: "error", message: `打包失败: ${e}` });
+  }
+}
+
 function toggleChangedOnly() {
   ui.changedOnly = !ui.changedOnly;
   if (ui.changedOnly) {
@@ -543,6 +569,8 @@ watch(
           :checked-count="project.checkedFiles.length"
           :checked-files="project.checkedFiles"
           :secrets="currentFileSecrets"
+          :review-content="project.reviewContent"
+          :is-reviewing="project.isReviewing"
           @update:active-tab="ui.previewTab = $event"
           @update:export-content="project.exportPreviewContent = $event"
           @mask-secrets="onMaskSecrets"
@@ -562,8 +590,10 @@ watch(
       :export-format="ui.exportFormat"
       :include-diff="ui.includeDiff"
       :is-git-repo="!!project.gitStatus?.is_repo"
+      :is-reviewing="project.isReviewing"
       @copy="onCopyToClipboard"
       @export="onExportToFile"
+      @review="onStartReview"
       @update:export-format="ui.exportFormat = $event"
       @update:include-diff="ui.includeDiff = $event"
     />

@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use tiktoken_rs::CoreBPE;
 
-use crate::config::{chrono_now, load_app_config, save_app_config, load_review_prompts, save_custom_review_prompt, delete_custom_review_prompt};
+use crate::config::{chrono_now, load_app_config, save_app_config, load_review_prompts, save_custom_review_prompt, delete_custom_review_prompt, load_api_config, save_api_config};
 use crate::metadata::extract_metadata;
 use crate::packer::{build_pack_content_with_limit, build_pack_content_extended};
 
@@ -19,7 +19,7 @@ use crate::plugins::{
 use crate::scanner::{build_file_tree, count_files, detect_project_type_with_plugins};
 use crate::stats::compute_project_stats;
 use tauri::Emitter;
-use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ReviewPrompt, ScanProgress, ScanResult, TokenEstimate};
+use crate::types::{ApiConfig, ExportFormat, PackResult, ProjectConfig, ProjectStats, ReviewPrompt, ScanProgress, ScanResult, TokenEstimate};
 
 #[tauri::command]
 pub async fn scan_directory_async(
@@ -452,6 +452,131 @@ pub fn delete_review_prompt_cmd(name: String) -> Result<(), String> {
         return Err("Cannot delete builtin prompts".to_string());
     }
     delete_custom_review_prompt(&name)
+}
+
+// ─── API Config Commands ──────────────────────────────────────
+
+#[tauri::command]
+pub fn load_api_config_cmd() -> Result<ApiConfig, String> {
+    Ok(load_api_config())
+}
+
+#[tauri::command]
+pub fn save_api_config_cmd(config: ApiConfig) -> Result<(), String> {
+    save_api_config(&config)
+}
+
+// ─── AI Review Command ────────────────────────────────────────
+
+#[tauri::command]
+pub async fn start_ai_review(
+    app: tauri::AppHandle,
+    content: String,
+    instruction: Option<String>,
+) -> Result<String, String> {
+    let config = load_api_config();
+    if config.api_key.is_empty() {
+        return Err("请先在设置中配置 API Key".to_string());
+    }
+
+    let base_url = if config.base_url.is_empty() {
+        match config.provider.as_str() {
+            "openai" => "https://api.openai.com/v1".to_string(),
+            "anthropic" => "https://api.anthropic.com/v1".to_string(),
+            "deepseek" => "https://api.deepseek.com/v1".to_string(),
+            _ => config.base_url.clone(),
+        }
+    } else {
+        config.base_url.clone()
+    };
+
+    let system_msg = instruction.unwrap_or_else(|| {
+        "You are an expert code reviewer. Analyze the provided code and give a detailed review covering: security issues, performance problems, code quality, and suggestions for improvement. Format your response in Markdown.".to_string()
+    });
+
+    // Build request based on provider
+    let client = reqwest::Client::new();
+
+    let request_body = if config.provider == "anthropic" {
+        serde_json::json!({
+            "model": config.model,
+            "max_tokens": 4096,
+            "system": system_msg,
+            "messages": [{"role": "user", "content": content}],
+            "stream": true
+        })
+    } else {
+        serde_json::json!({
+            "model": config.model,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": content}
+            ],
+            "stream": true
+        })
+    };
+
+    let mut request = client
+        .post(format!("{}/chat/completions", base_url))
+        .header("Content-Type", "application/json")
+        .json(&request_body);
+
+    if config.provider == "anthropic" {
+        request = client
+            .post(format!("{}/messages", base_url))
+            .header("Content-Type", "application/json")
+            .header("x-api-key", &config.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&request_body);
+    } else {
+        request = request.header("Authorization", format!("Bearer {}", config.api_key));
+    }
+
+    let response = request.send().await.map_err(|e| format!("API request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, body));
+    }
+
+    // Stream SSE response
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut full_content = String::new();
+    let mut buffer = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        // Process complete SSE lines
+        while let Some(pos) = buffer.find('\n') {
+            let line = buffer[..pos].trim().to_string();
+            buffer = buffer[pos + 1..].to_string();
+
+            if line.is_empty() || line == "data: [DONE]" {
+                continue;
+            }
+            if let Some(data) = line.strip_prefix("data: ") {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    // OpenAI/DeepSeek format
+                    if let Some(delta) = json["choices"][0]["delta"]["content"].as_str() {
+                        full_content.push_str(delta);
+                        let _ = app.emit("review-chunk", delta);
+                    }
+                    // Anthropic format
+                    if let Some(text) = json["delta"]["text"].as_str() {
+                        full_content.push_str(text);
+                        let _ = app.emit("review-chunk", text);
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("review-done", &full_content);
+    Ok(full_content)
 }
 
 // ─── Stats Command ─────────────────────────────────────────────

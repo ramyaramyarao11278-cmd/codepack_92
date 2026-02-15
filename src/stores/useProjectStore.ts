@@ -49,6 +49,12 @@ export const useProjectStore = defineStore("project", () => {
   const reviewPrompts = ref<ReviewPrompt[]>([]);
   const activeReviewPrompt = ref("");
 
+  // ─── AI Review State ──────────────────────────────────────
+  const reviewContent = ref("");
+  const isReviewing = ref(false);
+  let unlistenReviewChunk: (() => void) | null = null;
+  let unlistenReviewDone: (() => void) | null = null;
+
   // ─── File Watcher ──────────────────────────────────────────
   let unlistenFsChanged: (() => void) | null = null;
   let fsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -437,6 +443,37 @@ export const useProjectStore = defineStore("project", () => {
     return p?.instruction || "";
   });
 
+  async function startReview(packedContent: string) {
+    if (isReviewing.value) return;
+    isReviewing.value = true;
+    reviewContent.value = "";
+
+    // Listen for streaming chunks
+    if (unlistenReviewChunk) unlistenReviewChunk();
+    if (unlistenReviewDone) unlistenReviewDone();
+
+    unlistenReviewChunk = await listen<string>("review-chunk", (event) => {
+      reviewContent.value += event.payload;
+    });
+    unlistenReviewDone = await listen<string>("review-done", () => {
+      isReviewing.value = false;
+      if (unlistenReviewChunk) { unlistenReviewChunk(); unlistenReviewChunk = null; }
+      if (unlistenReviewDone) { unlistenReviewDone(); unlistenReviewDone = null; }
+    });
+
+    try {
+      await invoke<string>("start_ai_review", {
+        content: packedContent,
+        instruction: activeInstruction.value || undefined,
+      });
+    } catch (e) {
+      isReviewing.value = false;
+      toast.show({ type: "error", message: `Review 失败: ${e}` });
+      if (unlistenReviewChunk) { unlistenReviewChunk(); unlistenReviewChunk = null; }
+      if (unlistenReviewDone) { unlistenReviewDone(); unlistenReviewDone = null; }
+    }
+  }
+
   async function scanSecrets() {
     if (!fileTree.value || !projectPath.value) return;
     const paths = getAllCheckedFiles(fileTree.value);
@@ -525,6 +562,7 @@ export const useProjectStore = defineStore("project", () => {
     isScanning, isRefreshing, scanProgress, gitStatus, excludeRules,
     secretsMap, riskyFiles, totalSecretCount,
     reviewPrompts, activeReviewPrompt, activeInstruction,
+    reviewContent, isReviewing,
     selectedFilePath, previewContent, selectedFileSize, isLoading,
     exportPreviewContent,
     previewTokenCount, totalBytes,
@@ -536,6 +574,7 @@ export const useProjectStore = defineStore("project", () => {
     scanDirectory, refreshFileTree, selectFile, onTreeChanged, saveConfig, fetchGitStatus,
     scanSecrets, maskFileSecrets,
     loadReviewPrompts, saveReviewPrompt, deleteReviewPrompt,
+    startReview,
     loadPresets, savePreset, loadPreset, deletePreset,
     refreshExportPreview, updateTokenEstimate,
     contextAction, closeProject, saveExcludeRules,

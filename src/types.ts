@@ -111,6 +111,14 @@ export interface ReviewPrompt {
   builtin: boolean;
 }
 
+// CodePack: AI API 配置
+export interface ApiConfig {
+  provider: string;
+  model: string;
+  api_key: string;
+  base_url: string;
+}
+
 // CodePack: 扫描进度事件
 export interface ScanProgress {
   phase: string;

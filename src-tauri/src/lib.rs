@@ -49,6 +49,9 @@ pub fn run() {
             list_review_prompts_cmd,
             save_review_prompt_cmd,
             delete_review_prompt_cmd,
+            load_api_config_cmd,
+            save_api_config_cmd,
+            start_ai_review,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
