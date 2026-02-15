@@ -1,86 +1,157 @@
-# CodePack
+<div align="center">
 
-源码打包工具 — 将项目源码按模块打包，方便复制给 AI 或导出为文件。
+# 🛡️ CodePack
 
-## 功能
+### Your Local AI Code Auditor
 
-- **拖拽/选择项目文件夹** — 支持拖拽或点击选择
-- **自动识别项目类型** — Android / Flutter / Rust / Go / Next.js / Python / Java 等 15+ 种
-- **树形文件浏览** — 按目录结构展示，支持勾选/取消
-- **代码预览** — 右侧实时预览选中文件内容
-- **Token 估算** — 底部显示已选文件数和预估 token 数
-- **一键操作** — 复制到剪贴板 / 导出为文件
-- **记忆功能** — 自动保存每个项目的勾选状态，下次打开恢复
-- **项目元数据** — 自动提取版本号、依赖列表、入口文件等，导出时附加丰富上下文
-- **预设系统** — 保存多套勾选方案（如"前端代码"、"后端代码"），一键切换
-- **插件系统** — 自定义项目类型识别规则、排除目录、源码扩展名
-- **统计面板** — 按语言统计文件数、代码行数、大小占比，可视化分布条
+**Stop pasting code manually. Audit before you push.**
 
-## 技术栈
+*The desktop app that turns your codebase into AI-ready context — with built-in secret scanning, smart Git integration, and reviewer personas.*
 
-- **Tauri v2** — 桌面应用框架
-- **Vue 3 + TypeScript** — 前端
-- **Tailwind CSS** — 样式（深色主题）
-- **Rust** — 后端文件扫描与处理
+[![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%20v2-blue?logo=tauri)](https://tauri.app)
+[![Rust Backend](https://img.shields.io/badge/Backend-Rust-orange?logo=rust)](https://www.rust-lang.org)
+[![Vue 3 Frontend](https://img.shields.io/badge/Frontend-Vue%203-green?logo=vuedotjs)](https://vuejs.org)
 
-## 自动排除目录
+</div>
 
-`node_modules` `build` `dist` `.gradle` `.idea` `.vscode` `__pycache__` `.git` `target` `.next` `venv` 等
+---
 
-## 开发
+## Why CodePack?
+
+Every developer copy-pastes code into ChatGPT. But doing it manually is **slow**, **dangerous** (you might leak API keys), and **wasteful** (you send irrelevant files that burn tokens).
+
+CodePack solves all three:
+
+| Problem | CodePack Solution |
+|---------|-------------------|
+| 🐌 Manually selecting & copying files | **Drag-and-drop** your project, check the files you need, one-click export |
+| 🔑 Accidentally leaking secrets to AI | **Secret Scanner** detects API keys before export, one-click redaction |
+| 💸 Wasting tokens on unchanged code | **Git Changed Only** mode — review just what you wrote |
+| 🎯 AI gives generic, unfocused reviews | **Reviewer Personas** — Security Expert, Performance Optimizer, Clean Code |
+| 🌐 Data sent through third-party servers | **100% local processing** — your code never leaves your machine* |
+
+<sub>*API calls go directly from your machine to the AI provider. No middleman.</sub>
+
+---
+
+## ✨ Core Features
+
+### 🛡️ Secret Scanning — Audit Before You Send
+
+CodePack scans your code for **API keys, passwords, private keys, and tokens** before export.
+
+- **6 detection rules** — AWS Keys, OpenAI Keys, GitHub PATs, Google API Keys, SSH Private Keys, hardcoded passwords
+- **Visual warnings** — ⚠️ badges on risky files in the tree, red line highlights in preview
+- **One-click redaction** — mask secrets as `AKI******` before sending to AI
+- **Export interception** — blocking dialog prevents accidental leaks: *"Auto-redact and copy"* / *"Copy anyway"* / *"Cancel"*
+
+### 🔀 Smart Git Integration — Review What Matters
+
+- **`[Changed]` toggle** — one click to select only Git-modified files
+- **Include Diff** checkbox — embed unified diffs in your export so AI sees *what changed*, not just *all the code*
+- Branch name and change count displayed in the header
+
+### 🎭 Reviewer Personas — Focus the AI's Attention
+
+Pre-built review instructions that append to your export:
+
+| Persona | Focus |
+|---------|-------|
+| 🔒 **Security Expert** | Injection risks, auth vulnerabilities, hardcoded secrets, input validation |
+| ⚡ **Performance Optimizer** | Algorithm complexity, memory leaks, N+1 queries, caching opportunities |
+| 🧹 **Clean Code** | SOLID principles, code smells, naming, DRY, error handling |
+
+Create your own custom personas with any instruction text.
+
+### 📦 Intelligent Packing
+
+- **15+ project types** auto-detected (Rust, Go, Python, Node.js, Flutter, Android, Java, C++, Swift...)
+- **Smart exclusions** — `node_modules`, `build`, `dist`, `.git`, `__pycache__`, `target`, `venv` etc.
+- **3 export formats** — Plain Text, Markdown, XML
+- **Token estimation** — real-time count with context limit warnings
+- **Syntax highlighting** — Shiki-powered code preview
+- **File presets** — save/load different file selections per project
+- **Plugin system** — extend project detection with custom JSON rules
+- **Statistics panel** — language distribution, line counts, size breakdown
+
+---
+
+## 🖥️ Screenshots
+
+> *Screenshots coming soon — the app features a dark-themed UI with:*
+> - *Left panel: file tree with checkboxes, ⚠️ secret badges, and Git status*
+> - *Top bar: reviewer persona selector (🔒 ⚡ 🧹)*
+> - *Right panel: syntax-highlighted code preview with secret line highlighting*
+> - *Bottom bar: token count, format selector, Diff toggle, copy/export buttons*
+> - *Security dialog: blocking prompt before exporting files with detected secrets*
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 18+
+- [Rust](https://www.rust-lang.org/tools/install) 1.70+
+- [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
+
+### Install & Run
 
 ```bash
-# 安装依赖
+git clone https://github.com/ramyaramyarao11278-cmd/codepack_92.git
+cd codepack_92
 npm install
-
-# 启动开发模式
 npx tauri dev
+```
 
-# 构建生产版本
+### Build for Production
+
+```bash
 npx tauri build
 ```
 
-## 项目识别规则
+---
 
-| 文件 | 项目类型 |
-|------|---------|
-| `build.gradle.kts` / `build.gradle` | Android / Gradle |
-| `pubspec.yaml` | Flutter / Dart |
-| `Cargo.toml` | Rust |
-| `go.mod` | Go |
-| `pom.xml` | Java / Maven |
-| `Package.swift` | Swift |
-| `CMakeLists.txt` | C++ / CMake |
-| `next.config.*` | Next.js |
-| `nuxt.config.*` | Nuxt.js |
-| `vite.config.*` | Vite |
-| `pyproject.toml` / `requirements.txt` | Python |
-| `package.json` | Node.js |
-| 其他 | 通用 |
+## 🗺️ Roadmap
 
-## 插件系统
+- [x] Secret scanning with one-click redaction
+- [x] Git integration (changed files toggle + diff embedding)
+- [x] Reviewer personas (builtin + custom)
+- [x] Multi-format export (Plain / Markdown / XML)
+- [x] Token estimation with context limit warnings
+- [x] File presets and plugin system
+- [ ] **Direct AI API integration** — call OpenAI / DeepSeek / Anthropic from the app
+- [ ] **Streaming Review UI** — render AI review results as Markdown in-app
+- [ ] **API Key management** — secure storage in OS Keychain
+- [ ] **Code compression** — Tree-sitter AST skeleton mode to reduce tokens
+- [ ] **Review history** — save and compare past reviews
 
-在系统配置目录下创建 `codepack/plugins/` 文件夹，添加 JSON 插件文件即可扩展项目识别：
+---
 
-```jsonc
-// ~/.config/codepack/plugins/unity.json (Linux/macOS)
-// %APPDATA%/codepack/plugins/unity.json (Windows)
-{
-  "name": "Unity",
-  "version": "1.0",
-  "detect_files": ["ProjectSettings/ProjectVersion.txt"],
-  "detect_dirs": ["Assets", "Packages"],
-  "exclude_dirs": ["Library", "Temp", "Logs"],
-  "source_extensions": ["cs", "shader", "compute"]
-}
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                   Vue 3 + Tailwind               │
+│  FileTree │ CodePreview │ ReviewPromptBar │ ...  │
+├─────────────────────────────────────────────────┤
+│               Pinia State Management             │
+│  useProjectStore │ useUIStore │ useToast         │
+├─────────────────────────────────────────────────┤
+│                 Tauri v2 Bridge                   │
+├─────────────────────────────────────────────────┤
+│                   Rust Backend                    │
+│  scanner │ security │ packer │ git │ config      │
+│  metadata │ stats │ plugins │ watcher            │
+└─────────────────────────────────────────────────┘
 ```
 
-也可以通过应用内的设置面板（齿轮图标）可视化管理插件。
+- **Rust backend** — file scanning, secret detection (regex), Git operations (libgit2), packing, token counting (tiktoken)
+- **Vue 3 frontend** — reactive file tree, syntax highlighting (Shiki), real-time preview
+- **Tauri v2** — native desktop performance, no Electron bloat
 
-## 预设系统
+---
 
-对同一个项目可以保存多套文件勾选方案，方便在不同导出场景间快速切换。预设持久化保存在配置文件中。
+## 📄 License
 
-## 配置存储
-
-配置保存在系统 AppData 目录下的 `codepack_config.json`。
+MIT
