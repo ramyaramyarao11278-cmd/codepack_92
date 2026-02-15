@@ -8,6 +8,8 @@ pub struct FileNode {
     pub is_dir: bool,
     pub children: Vec<FileNode>,
     pub checked: bool,
+    #[serde(default)]
+    pub indeterminate: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -190,6 +190,7 @@ pub fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions:
         is_dir: true,
         children: Vec::new(),
         checked: true,
+        indeterminate: false,
     };
 
     // Build override rules to exclude directories
@@ -256,6 +257,7 @@ pub fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions:
                 is_dir: false,
                 children: Vec::new(),
                 checked: true,
+                indeterminate: false,
             };
             dir_children.entry(parent_path).or_default().push(file_node);
         }
@@ -279,6 +281,7 @@ pub fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions:
             is_dir: true,
             children,
             checked: true,
+            indeterminate: false,
         };
         let parent = dir_path.parent().unwrap_or(root).to_path_buf();
         dir_children.entry(parent).or_default().push(dir_node);
@@ -452,6 +455,7 @@ mod tests {
             is_dir: true,
             children: Vec::new(),
             checked: true,
+            indeterminate: false,
         };
         assert_eq!(count_files(&node), 0);
     }
