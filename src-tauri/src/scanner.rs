@@ -144,18 +144,16 @@ pub fn detect_project_type(root: &Path) -> String {
         return "Docker".to_string();
     }
     // 11-13. JS frameworks (check config files)
-    for entry in fs::read_dir(root).into_iter().flatten() {
-        if let Ok(entry) = entry {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("next.config") {
-                return "Next.js".to_string();
-            }
-            if name.starts_with("nuxt.config") {
-                return "Nuxt.js".to_string();
-            }
-            if name.starts_with("vite.config") {
-                return "Vite".to_string();
-            }
+    for entry in fs::read_dir(root).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("next.config") {
+            return "Next.js".to_string();
+        }
+        if name.starts_with("nuxt.config") {
+            return "Nuxt.js".to_string();
+        }
+        if name.starts_with("vite.config") {
+            return "Vite".to_string();
         }
     }
     // 14. Python
@@ -200,7 +198,7 @@ fn build_tree_recursive(dir: &Path, parent: &mut FileNode, extra_excludes: &[Str
     };
 
     let mut entries_vec: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries_vec.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    entries_vec.sort_by_key(|a| a.file_name());
 
     for entry in entries_vec {
         let path = entry.path();
@@ -257,4 +255,142 @@ pub fn count_files(node: &FileNode) -> u32 {
         count += count_files(child);
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_is_excluded_dir_builtin() {
+        assert!(is_excluded_dir("node_modules", &[]));
+        assert!(is_excluded_dir("Node_Modules", &[]));
+        assert!(is_excluded_dir(".git", &[]));
+        assert!(is_excluded_dir("target", &[]));
+        assert!(!is_excluded_dir("src", &[]));
+        assert!(!is_excluded_dir("lib", &[]));
+    }
+
+    #[test]
+    fn test_is_excluded_dir_extra() {
+        let extra = vec!["custom_build".to_string()];
+        assert!(is_excluded_dir("custom_build", &extra));
+        assert!(is_excluded_dir("Custom_Build", &extra));
+        assert!(!is_excluded_dir("src", &extra));
+    }
+
+    #[test]
+    fn test_is_source_file_extensions() {
+        assert!(is_source_file("main.rs", &[]));
+        assert!(is_source_file("app.vue", &[]));
+        assert!(is_source_file("index.ts", &[]));
+        assert!(is_source_file("style.css", &[]));
+        assert!(is_source_file("config.json", &[]));
+        assert!(!is_source_file("image.png", &[]));
+        assert!(!is_source_file("video.mp4", &[]));
+    }
+
+    #[test]
+    fn test_is_source_file_special_names() {
+        assert!(is_source_file("Dockerfile", &[]));
+        assert!(is_source_file("Makefile", &[]));
+        assert!(is_source_file("Gemfile", &[]));
+    }
+
+    #[test]
+    fn test_is_source_file_extra_extensions() {
+        let extra = vec!["xyz".to_string()];
+        assert!(is_source_file("data.xyz", &extra));
+        assert!(!is_source_file("data.xyz", &[]));
+    }
+
+    #[test]
+    fn test_detect_project_type_rust() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Rust");
+    }
+
+    #[test]
+    fn test_detect_project_type_node() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Node.js");
+    }
+
+    #[test]
+    fn test_detect_project_type_python() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("requirements.txt"), "flask").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Python");
+    }
+
+    #[test]
+    fn test_detect_project_type_go() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("go.mod"), "module example.com/test\ngo 1.21").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Go");
+    }
+
+    #[test]
+    fn test_detect_project_type_flutter() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("pubspec.yaml"), "name: test").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Flutter / Dart");
+    }
+
+    #[test]
+    fn test_detect_project_type_vite() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("vite.config.ts"), "export default {}").unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        assert_eq!(detect_project_type(dir.path()), "Vite");
+    }
+
+    #[test]
+    fn test_detect_project_type_unknown() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(detect_project_type(dir.path()), "通用");
+    }
+
+    #[test]
+    fn test_build_file_tree_basic() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("image.png"), "binary").unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub fn hello() {}").unwrap();
+
+        let tree = build_file_tree(dir.path(), &[], &[]);
+        assert!(tree.is_dir);
+        // Should include main.rs and src/lib.rs but not image.png
+        let file_count = count_files(&tree);
+        assert_eq!(file_count, 2);
+    }
+
+    #[test]
+    fn test_build_file_tree_excludes_dirs() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "").unwrap();
+        fs::create_dir(dir.path().join("node_modules")).unwrap();
+        fs::write(dir.path().join("node_modules/pkg.js"), "").unwrap();
+
+        let tree = build_file_tree(dir.path(), &[], &[]);
+        assert_eq!(count_files(&tree), 1);
+    }
+
+    #[test]
+    fn test_count_files_empty() {
+        let node = FileNode {
+            name: "root".to_string(),
+            path: "/root".to_string(),
+            is_dir: true,
+            children: Vec::new(),
+            checked: true,
+        };
+        assert_eq!(count_files(&node), 0);
+    }
 }

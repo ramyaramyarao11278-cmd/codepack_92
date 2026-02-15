@@ -71,3 +71,69 @@ pub fn get_plugin_source_extensions(plugins: &[PluginDef]) -> Vec<String> {
         .flat_map(|p| p.source_extensions.iter().cloned())
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn make_plugin(name: &str, files: Vec<&str>, dirs: Vec<&str>) -> PluginDef {
+        PluginDef {
+            name: name.to_string(),
+            version: "1.0".to_string(),
+            detect_files: files.into_iter().map(|s| s.to_string()).collect(),
+            detect_dirs: dirs.into_iter().map(|s| s.to_string()).collect(),
+            exclude_dirs: vec!["custom_out".to_string()],
+            source_extensions: vec!["xyz".to_string()],
+        }
+    }
+
+    #[test]
+    fn test_plugin_matches_by_file() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("special.config"), "").unwrap();
+        let plugin = make_plugin("Special", vec!["special.config"], vec![]);
+        assert!(plugin_matches(&plugin, dir.path()));
+    }
+
+    #[test]
+    fn test_plugin_matches_by_dir() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("custom_dir")).unwrap();
+        let plugin = make_plugin("Custom", vec![], vec!["custom_dir"]);
+        assert!(plugin_matches(&plugin, dir.path()));
+    }
+
+    #[test]
+    fn test_plugin_no_match() {
+        let dir = TempDir::new().unwrap();
+        let plugin = make_plugin("Missing", vec!["nonexistent.file"], vec![]);
+        assert!(!plugin_matches(&plugin, dir.path()));
+    }
+
+    #[test]
+    fn test_plugin_empty_rules_no_match() {
+        let dir = TempDir::new().unwrap();
+        let plugin = make_plugin("Empty", vec![], vec![]);
+        assert!(!plugin_matches(&plugin, dir.path()));
+    }
+
+    #[test]
+    fn test_get_plugin_excluded_dirs() {
+        let plugins = vec![
+            make_plugin("A", vec![], vec![]),
+            make_plugin("B", vec![], vec![]),
+        ];
+        let excludes = get_plugin_excluded_dirs(&plugins);
+        assert_eq!(excludes.len(), 2);
+        assert!(excludes.iter().all(|e| e == "custom_out"));
+    }
+
+    #[test]
+    fn test_get_plugin_source_extensions() {
+        let plugins = vec![make_plugin("A", vec![], vec![])];
+        let exts = get_plugin_source_extensions(&plugins);
+        assert_eq!(exts, vec!["xyz".to_string()]);
+    }
+}

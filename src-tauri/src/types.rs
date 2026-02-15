@@ -30,17 +30,9 @@ pub struct ProjectConfig {
     pub pinned: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub projects: HashMap<String, ProjectConfig>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            projects: HashMap::new(),
-        }
-    }
 }
 
 // CodePack: pack_files 返回结构，包含统计信息

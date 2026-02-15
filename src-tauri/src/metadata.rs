@@ -322,3 +322,124 @@ pub fn extract_xml_tag(text: &str, tag: &str) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_extract_xml_tag() {
+        assert_eq!(extract_xml_tag("<name>hello</name>", "name"), Some("hello".to_string()));
+        assert_eq!(extract_xml_tag("<version> 1.0 </version>", "version"), Some("1.0".to_string()));
+        assert_eq!(extract_xml_tag("<foo>bar</foo>", "baz"), None);
+        assert_eq!(extract_xml_tag("no tags here", "x"), None);
+    }
+
+    #[test]
+    fn test_extract_metadata_rust() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), r#"
+[package]
+name = "myapp"
+version = "0.2.0"
+description = "A test app"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
+"#).unwrap();
+
+        let meta = extract_metadata(dir.path(), "Rust");
+        assert_eq!(meta.name, "myapp");
+        assert_eq!(meta.version, Some("0.2.0".to_string()));
+        assert_eq!(meta.description, Some("A test app".to_string()));
+        assert!(meta.runtime.iter().any(|r| r.contains("edition 2021")));
+        assert!(meta.dependencies.contains(&"serde".to_string()));
+        assert!(meta.dependencies.contains(&"tokio".to_string()));
+        assert!(meta.dev_dependencies.contains(&"tempfile".to_string()));
+        assert!(meta.requirements.iter().any(|r| r.contains("serde@1")));
+    }
+
+    #[test]
+    fn test_extract_metadata_node() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), r#"{
+  "name": "my-app",
+  "version": "1.0.0",
+  "description": "Test node app",
+  "main": "index.js",
+  "engines": { "node": ">=18" },
+  "dependencies": { "express": "^4.18.0", "lodash": "^4.17.21" },
+  "devDependencies": { "jest": "^29.0.0" }
+}"#).unwrap();
+
+        let meta = extract_metadata(dir.path(), "Node.js");
+        assert_eq!(meta.name, "my-app");
+        assert_eq!(meta.version, Some("1.0.0".to_string()));
+        assert_eq!(meta.entry_point, Some("index.js".to_string()));
+        assert!(meta.runtime.iter().any(|r| r.contains("node >=18")));
+        assert_eq!(meta.dependencies.len(), 2);
+        assert!(meta.requirements.iter().any(|r| r == "express@^4.18.0"));
+        assert!(meta.dev_dependencies.contains(&"jest".to_string()));
+    }
+
+    #[test]
+    fn test_extract_metadata_python_pyproject() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("pyproject.toml"), r#"
+[project]
+name = "mylib"
+version = "0.1.0"
+description = "A Python library"
+requires-python = ">=3.9"
+dependencies = ["flask>=2.0", "requests"]
+"#).unwrap();
+
+        let meta = extract_metadata(dir.path(), "Python");
+        assert_eq!(meta.name, "mylib");
+        assert_eq!(meta.version, Some("0.1.0".to_string()));
+        assert!(meta.runtime.iter().any(|r| r.contains("python >=3.9")));
+        assert!(meta.dependencies.contains(&"flask".to_string()));
+        assert!(meta.requirements.iter().any(|r| r == "flask>=2.0"));
+    }
+
+    #[test]
+    fn test_extract_metadata_python_requirements_txt() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("requirements.txt"), "flask>=2.0\nrequests==2.28.0\n# comment\n").unwrap();
+        fs::write(dir.path().join("main.py"), "").unwrap();
+
+        let meta = extract_metadata(dir.path(), "Python");
+        assert_eq!(meta.dependencies.len(), 2);
+        assert!(meta.requirements.iter().any(|r| r == "flask>=2.0"));
+        assert_eq!(meta.entry_point, Some("main.py".to_string()));
+    }
+
+    #[test]
+    fn test_extract_metadata_go() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("go.mod"), "module github.com/user/app\n\ngo 1.21\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.9.1\n)\n").unwrap();
+        fs::write(dir.path().join("main.go"), "package main").unwrap();
+
+        let meta = extract_metadata(dir.path(), "Go");
+        assert_eq!(meta.name, "github.com/user/app");
+        assert!(meta.runtime.iter().any(|r| r.contains("go 1.21")));
+        assert!(meta.dependencies.contains(&"github.com/gin-gonic/gin".to_string()));
+        assert_eq!(meta.entry_point, Some("main.go".to_string()));
+    }
+
+    #[test]
+    fn test_extract_metadata_unknown_type() {
+        let dir = TempDir::new().unwrap();
+        let meta = extract_metadata(dir.path(), "Unknown");
+        assert_eq!(meta.project_type, "Unknown");
+        assert!(meta.dependencies.is_empty());
+        assert!(meta.runtime.is_empty());
+    }
+}
