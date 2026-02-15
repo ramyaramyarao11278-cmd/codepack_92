@@ -1,10 +1,13 @@
 <!-- CodePack: 三模式预览组件（单文件预览 + 导出预览 + 统计） -->
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import StatsPanel from "./StatsPanel.vue";
 import { useHighlighter } from "../composables/useHighlighter";
 
 const { highlightedHtml, isHighlighting, highlight } = useHighlighter();
+
+const isEditing = ref(false);
+const editedContent = ref("");
 
 const props = defineProps<{
   content: string;
@@ -19,7 +22,31 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "update:activeTab", tab: "file" | "export" | "stats"): void;
+  (e: "update:exportContent", content: string): void;
 }>();
+
+function toggleEdit() {
+  if (!isEditing.value) {
+    editedContent.value = props.exportContent;
+    isEditing.value = true;
+  } else {
+    emit("update:exportContent", editedContent.value);
+    isEditing.value = false;
+  }
+}
+
+function cancelEdit() {
+  isEditing.value = false;
+  editedContent.value = "";
+}
+
+// Reset editing when export content changes from outside
+watch(() => props.exportContent, () => {
+  if (isEditing.value) {
+    isEditing.value = false;
+    editedContent.value = "";
+  }
+});
 
 const lines = computed(() => {
   if (!props.content) return [];
@@ -89,7 +116,23 @@ function formatSize(bytes: number): string {
           <span v-if="fileSize > 0" class="text-dark-600 ml-2">{{ formatSize(fileSize) }}</span>
         </template>
         <template v-else-if="activeTab === 'export' && exportContent">
+          <span v-if="isEditing" class="text-yellow-400 mr-2">编辑中</span>
           共 {{ exportLines.length }} 行
+          <button
+            v-if="exportContent && !isEditing"
+            class="ml-2 px-2 py-0.5 text-xs rounded bg-dark-700 text-dark-300 hover:bg-dark-600 hover:text-dark-200 transition-colors"
+            @click="toggleEdit"
+          >编辑</button>
+          <template v-if="isEditing">
+            <button
+              class="ml-2 px-2 py-0.5 text-xs rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+              @click="toggleEdit"
+            >保存</button>
+            <button
+              class="ml-1 px-2 py-0.5 text-xs rounded bg-dark-700 text-dark-400 hover:bg-dark-600 transition-colors"
+              @click="cancelEdit"
+            >取消</button>
+          </template>
         </template>
       </div>
     </div>
@@ -152,6 +195,16 @@ function formatSize(bytes: number): string {
         <div class="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
       </div>
 
+      <!-- CodePack: 编辑模式 -->
+      <div v-else-if="isEditing" class="flex-1 overflow-hidden">
+        <textarea
+          v-model="editedContent"
+          class="w-full h-full p-4 font-mono text-xs leading-5 text-dark-200 bg-dark-900 border-none outline-none resize-none"
+          spellcheck="false"
+        />
+      </div>
+
+      <!-- CodePack: 只读预览模式 -->
       <div v-else class="flex-1 overflow-auto font-mono text-xs leading-5">
         <table class="w-full border-collapse">
           <tbody>

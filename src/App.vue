@@ -56,7 +56,7 @@ function formatTokens(n: number): string {
   return Math.round(n).toString();
 }
 
-// CodePack: 复制到剪贴板
+// CodePack: 复制到剪贴板（优先使用编辑后的内容）
 async function onCopyToClipboard() {
   if (!project.fileTree) return;
   const paths = project.checkedFiles;
@@ -65,6 +65,14 @@ async function onCopyToClipboard() {
     return;
   }
   try {
+    // If user has edited the export preview, use that directly
+    if (project.exportPreviewContent) {
+      await invoke("copy_to_clipboard", { content: project.exportPreviewContent });
+      ui.copySuccess = true;
+      setTimeout(() => (ui.copySuccess = false), 2000);
+      toast.show({ type: "success", message: "已复制编辑后的内容到剪贴板" });
+      return;
+    }
     const result = await invoke<PackResult>("pack_files", {
       paths,
       projectPath: project.projectPath,
@@ -91,7 +99,7 @@ async function onCopyToClipboard() {
   }
 }
 
-// CodePack: 导出为文件
+// CodePack: 导出为文件（优先使用编辑后的内容）
 async function onExportToFile() {
   if (!project.fileTree) return;
   const paths = project.checkedFiles;
@@ -113,6 +121,22 @@ async function onExportToFile() {
       ],
     });
     if (!savePath) return;
+
+    // If user has edited the export preview, write that directly
+    if (project.exportPreviewContent) {
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      await writeTextFile(savePath, project.exportPreviewContent);
+      ui.exportSuccess = true;
+      setTimeout(() => (ui.exportSuccess = false), 2000);
+      toast.show({
+        type: "success",
+        message: `已导出编辑后的内容到 ${savePath}`,
+        action: { label: "打开目录", onClick: () => invoke("open_directory", { path: savePath }) },
+        duration: 5000,
+      });
+      return;
+    }
+
     const resultPath = await invoke<string>("export_to_file", {
       paths,
       projectPath: project.projectPath,
@@ -333,6 +357,7 @@ watch(
           :checked-count="project.checkedFiles.length"
           :checked-files="project.checkedFiles"
           @update:active-tab="ui.previewTab = $event"
+          @update:export-content="project.exportPreviewContent = $event"
         />
       </div>
     </div>
