@@ -90,6 +90,14 @@ pub struct ProjectMetadata {
     pub requirements: Vec<String>,
 }
 
+// CodePack: 扫描进度事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanProgress {
+    pub phase: String,
+    pub files_found: u32,
+    pub message: String,
+}
+
 // CodePack: 项目统计数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LangStat {

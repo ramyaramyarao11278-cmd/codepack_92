@@ -377,6 +377,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tempfile",
  "tiktoken-rs",
+ "tokio",
  "toml 0.8.2",
 ]
 

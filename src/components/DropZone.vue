@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 const props = defineProps<{
   isScanning: boolean;
   isDragging: boolean;
+  scanMessage?: string;
 }>();
 
 const emit = defineEmits<{
@@ -44,7 +45,7 @@ async function onClickOpen() {
         <div
           class="w-10 h-10 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"
         />
-        <span class="text-sm text-dark-400">扫描中...</span>
+        <span class="text-sm text-dark-400">{{ scanMessage || '扫描中...' }}</span>
       </div>
       <div v-else class="flex flex-col items-center gap-3">
         <svg

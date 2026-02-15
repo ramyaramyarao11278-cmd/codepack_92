@@ -2,7 +2,8 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../composables/useToast";
-import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat, GitStatus } from "../types";
+import { listen } from "@tauri-apps/api/event";
+import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat, GitStatus, ScanProgress } from "../types";
 
 export const useProjectStore = defineStore("project", () => {
   const toast = useToast();
@@ -14,6 +15,7 @@ export const useProjectStore = defineStore("project", () => {
   const fileTree = ref<FileNode | null>(null);
   const isScanning = ref(false);
   const isRefreshing = ref(false);
+  const scanProgress = ref<ScanProgress | null>(null);
 
   // ─── Preview State ───────────────────────────────────────────
   const selectedFilePath = ref("");
@@ -102,7 +104,16 @@ export const useProjectStore = defineStore("project", () => {
     try {
       const rules = await invoke<string[]>("load_exclude_rules", { projectPath: path });
       excludeRules.value = rules;
-      const result = await invoke<ScanResult>("scan_directory", { path, customExcludes: rules });
+      const unlisten = await listen<ScanProgress>("scan-progress", (event) => {
+        scanProgress.value = event.payload;
+      });
+      let result: ScanResult;
+      try {
+        result = await invoke<ScanResult>("scan_directory_async", { path, customExcludes: rules });
+      } finally {
+        unlisten();
+        scanProgress.value = null;
+      }
       projectType.value = result.project_type;
       projectMetadata.value = result.metadata;
       fileTree.value = result.tree;
@@ -384,7 +395,7 @@ export const useProjectStore = defineStore("project", () => {
   return {
     // State
     projectPath, projectType, projectMetadata, fileTree,
-    isScanning, isRefreshing, gitStatus, excludeRules,
+    isScanning, isRefreshing, scanProgress, gitStatus, excludeRules,
     selectedFilePath, previewContent, selectedFileSize, isLoading,
     exportPreviewContent,
     previewTokenCount, totalBytes,

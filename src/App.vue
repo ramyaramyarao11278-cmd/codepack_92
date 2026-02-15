@@ -84,9 +84,15 @@ async function onCopyToClipboard() {
     ui.copySuccess = true;
     setTimeout(() => (ui.copySuccess = false), 2000);
     if (result.skipped_files && result.skipped_files.length > 0) {
+      const reasons = result.skipped_files.map((f: { path: string; reason: string }) => f.reason);
+      const binary = reasons.filter((r: string) => r.includes("binary")).length;
+      const oversized = reasons.filter((r: string) => r.includes("limit")).length;
+      const parts: string[] = [];
+      if (oversized > 0) parts.push(`${oversized} 个超大文件`);
+      if (binary > 0) parts.push(`${binary} 个二进制文件`);
       toast.show({
         type: "info",
-        message: `跳过了 ${result.skipped_files.length} 个超大文件（>${ui.maxFileKB}KB）`,
+        message: `跳过了 ${parts.join("、")}`,
         duration: 4000,
       });
     }
@@ -260,6 +266,7 @@ watch(
           v-if="!project.fileTree"
           :is-scanning="project.isScanning"
           :is-dragging="ui.isDragging"
+          :scan-message="project.scanProgress?.message"
           @folder-drop="onFolderDrop"
         />
         <div v-else class="flex flex-col h-full">

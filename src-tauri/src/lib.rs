@@ -17,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             scan_directory,
+            scan_directory_async,
             read_file_content,
             save_project_config,
             load_project_config,

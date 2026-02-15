@@ -18,7 +18,70 @@ use crate::plugins::{
 };
 use crate::scanner::{build_file_tree, count_files, detect_project_type_with_plugins};
 use crate::stats::compute_project_stats;
-use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ScanResult, TokenEstimate};
+use tauri::Emitter;
+use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ScanProgress, ScanResult, TokenEstimate};
+
+#[tauri::command]
+pub async fn scan_directory_async(
+    app: tauri::AppHandle,
+    path: String,
+    custom_excludes: Option<Vec<String>>,
+) -> Result<ScanResult, String> {
+    let path_clone = path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let root = Path::new(&path_clone);
+        if !root.exists() || !root.is_dir() {
+            return Err("Path does not exist or is not a directory".to_string());
+        }
+
+        let _ = app.emit("scan-progress", ScanProgress {
+            phase: "detecting".to_string(),
+            files_found: 0,
+            message: "Detecting project type...".to_string(),
+        });
+
+        let plugins = load_plugins();
+        let project_type = detect_project_type_with_plugins(root, &plugins);
+        let mut extra_excludes = get_plugin_excluded_dirs(&plugins);
+        if let Some(custom) = custom_excludes {
+            extra_excludes.extend(custom);
+        }
+        let extra_extensions = get_plugin_source_extensions(&plugins);
+
+        let _ = app.emit("scan-progress", ScanProgress {
+            phase: "scanning".to_string(),
+            files_found: 0,
+            message: "Scanning files...".to_string(),
+        });
+
+        let tree = build_file_tree(root, &extra_excludes, &extra_extensions);
+        let total_files = count_files(&tree);
+
+        let _ = app.emit("scan-progress", ScanProgress {
+            phase: "metadata".to_string(),
+            files_found: total_files,
+            message: format!("Found {} files, extracting metadata...", total_files),
+        });
+
+        let metadata = extract_metadata(root, &project_type);
+
+        let _ = app.emit("scan-progress", ScanProgress {
+            phase: "done".to_string(),
+            files_found: total_files,
+            message: format!("Scan complete: {} files", total_files),
+        });
+
+        Ok(ScanResult {
+            project_type,
+            tree,
+            total_files,
+            metadata,
+        })
+    })
+    .await
+    .map_err(|e| format!("Scan task failed: {}", e))?;
+    result
+}
 
 #[tauri::command]
 pub fn scan_directory(path: String, custom_excludes: Option<Vec<String>>) -> Result<ScanResult, String> {

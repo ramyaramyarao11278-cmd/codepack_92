@@ -91,6 +91,13 @@ export interface PackResult {
   skipped_files: SkippedFile[];
 }
 
+// CodePack: 扫描进度事件
+export interface ScanProgress {
+  phase: string;
+  files_found: number;
+  message: string;
+}
+
 // CodePack: estimate_tokens 返回结构
 export interface TokenEstimate {
   tokens: number;
