@@ -269,12 +269,31 @@ watch(
             @update:new-name="ui.newPresetName = $event"
             @save="onSavePreset"
           />
+          <!-- CodePack: 文件搜索过滤 -->
+          <div class="px-2 py-1.5 border-b border-dark-700 bg-dark-850">
+            <div class="relative">
+              <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                v-model="ui.treeFilter"
+                class="w-full pl-7 pr-6 py-1 text-xs bg-dark-800 border border-dark-600 rounded-md text-dark-200 placeholder-dark-500 focus:outline-none focus:border-emerald-400/50"
+                placeholder="搜索文件..."
+              />
+              <button
+                v-if="ui.treeFilter"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 text-dark-500 hover:text-dark-300 text-xs"
+                @click="ui.treeFilter = ''"
+              >✕</button>
+            </div>
+          </div>
           <div class="flex-1 overflow-auto p-2">
             <FileTree
               :node="project.fileTree"
               :depth="0"
               :selected-path="project.selectedFilePath"
               :collapsed-state="project.collapsedState"
+              :filter-text="ui.treeFilter"
               @select="onFileSelect"
               @toggle="project.onTreeChanged()"
               @context-action="project.contextAction"

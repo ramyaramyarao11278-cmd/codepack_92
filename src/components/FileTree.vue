@@ -1,6 +1,6 @@
 <!-- CodePack: 文件树组件，支持右键菜单 -->
 <script setup lang="ts">
-import { reactive } from "vue";
+import { reactive, computed } from "vue";
 import type { FileNode } from "../types";
 
 const props = defineProps<{
@@ -9,7 +9,26 @@ const props = defineProps<{
   selectedPath: string;
   // CodePack: 共享折叠状态，由根组件传入
   collapsedState: Record<string, boolean>;
+  filterText?: string;
 }>();
+
+function nodeMatchesFilter(node: FileNode, filter: string): boolean {
+  if (!filter) return true;
+  const lower = filter.toLowerCase();
+  if (node.name.toLowerCase().includes(lower)) return true;
+  if (node.is_dir && node.children) {
+    return node.children.some((c) => nodeMatchesFilter(c, filter));
+  }
+  return false;
+}
+
+const filteredChildren = computed(() => {
+  if (!props.node.children) return [];
+  if (!props.filterText) return props.node.children;
+  return props.node.children.filter((c) => nodeMatchesFilter(c, props.filterText!));
+});
+
+const nodeVisible = computed(() => nodeMatchesFilter(props.node, props.filterText || ""));
 
 const emit = defineEmits<{
   (e: "select", path: string): void;
@@ -146,14 +165,15 @@ function getFileIcon(name: string, isDir: boolean): string {
     </div>
 
     <!-- Children -->
-    <div v-if="node.is_dir && node.children && !isCollapsed(node.path)">
+    <div v-if="node.is_dir && filteredChildren.length > 0 && (!isCollapsed(node.path) || filterText)">
       <FileTree
-        v-for="child in node.children"
+        v-for="child in filteredChildren"
         :key="child.path"
         :node="child"
         :depth="depth + 1"
         :selected-path="selectedPath"
         :collapsed-state="collapsedState"
+        :filter-text="filterText"
         @select="(p: string) => emit('select', p)"
         @toggle="onChildToggle"
         @context-action="(a: string, e?: string) => emit('context-action', a, e)"
