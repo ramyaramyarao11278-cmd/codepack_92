@@ -9,6 +9,7 @@ use crate::metadata::extract_metadata;
 use crate::types::{ExportFormat, PackResult, ProjectMetadata, SkippedFile};
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 1_048_576; // 1 MB
+const MAX_FILE_COUNT: usize = 5_000;
 
 static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
     tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
@@ -80,7 +81,30 @@ pub fn build_pack_content_with_limit(
             continue;
         }
 
-        if let Ok(content) = fs::read_to_string(path) {
+        // Binary file detection: skip non-UTF-8 files
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => {
+                skipped_files.push(SkippedFile {
+                    path: relative.clone(),
+                    reason: "binary or unreadable file".to_string(),
+                    size_bytes: file_size,
+                });
+                continue;
+            }
+        };
+
+        // Enforce max file count
+        if file_count as usize >= MAX_FILE_COUNT {
+            skipped_files.push(SkippedFile {
+                path: relative.clone(),
+                reason: format!("exceeds {} file limit", MAX_FILE_COUNT),
+                size_bytes: file_size,
+            });
+            continue;
+        }
+
+        {
             total_bytes += content.len() as u64;
             file_count += 1;
 
@@ -542,6 +566,26 @@ mod tests {
         );
         assert_eq!(result.file_count, 1);
         assert!(result.skipped_files.is_empty());
+    }
+
+    #[test]
+    fn test_binary_file_skipped() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        // Write invalid UTF-8 bytes
+        fs::write(dir.path().join("image.rs"), &[0xFF, 0xFE, 0x00, 0x01, 0x80, 0x90]).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\n").unwrap();
+
+        let paths = vec![
+            dir.path().join("main.rs").to_string_lossy().to_string(),
+            dir.path().join("image.rs").to_string_lossy().to_string(),
+        ];
+        let result = build_pack_content_with_limit(
+            &paths, &dir.path().to_string_lossy(), "Rust", &ExportFormat::Plain, Some(10_000_000),
+        );
+        assert_eq!(result.file_count, 1);
+        assert_eq!(result.skipped_files.len(), 1);
+        assert!(result.skipped_files[0].reason.contains("binary"));
     }
 
     #[test]
