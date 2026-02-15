@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod stats;
 pub mod packer;
 pub mod git;
+pub mod security;
 pub mod watcher;
 pub mod commands;
 
@@ -41,6 +42,13 @@ pub fn run() {
             get_git_status_cmd,
             start_watching_cmd,
             stop_watching_cmd,
+            pack_files_extended,
+            scan_secrets_cmd,
+            scan_all_secrets_cmd,
+            mask_file_secrets_cmd,
+            list_review_prompts_cmd,
+            save_review_prompt_cmd,
+            delete_review_prompt_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

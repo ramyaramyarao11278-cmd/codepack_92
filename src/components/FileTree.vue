@@ -10,6 +10,7 @@ const props = defineProps<{
   // CodePack: 共享折叠状态，由根组件传入
   collapsedState: Record<string, boolean>;
   filterText?: string;
+  riskyFiles?: Set<string>;
 }>();
 
 function nodeMatchesFilter(node: FileNode, filter: string): boolean {
@@ -162,6 +163,11 @@ function getFileIcon(name: string, isDir: boolean): string {
       <!-- Icon & Name -->
       <span class="text-xs shrink-0">{{ getFileIcon(node.name, node.is_dir) }}</span>
       <span class="truncate text-xs">{{ node.name }}</span>
+      <span
+        v-if="!node.is_dir && riskyFiles?.has(node.path)"
+        class="text-red-400 text-xs shrink-0 ml-auto"
+        title="检测到潜在敏感信息"
+      >⚠️</span>
     </div>
 
     <!-- Children -->
@@ -174,6 +180,7 @@ function getFileIcon(name: string, isDir: boolean): string {
         :selected-path="selectedPath"
         :collapsed-state="collapsedState"
         :filter-text="filterText"
+        :risky-files="riskyFiles"
         @select="(p: string) => emit('select', p)"
         @toggle="onChildToggle"
         @context-action="(a: string, e?: string) => emit('context-action', a, e)"

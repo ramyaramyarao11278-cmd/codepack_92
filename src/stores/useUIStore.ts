@@ -14,6 +14,8 @@ export const useUIStore = defineStore("ui", () => {
   const maxFileKB = ref(1024); // 1MB default, in KB
   const treeFilter = ref("");
   const showExcludeEditor = ref(false);
+  const changedOnly = ref(false);
+  const includeDiff = ref(false);
 
   function resetPresetUI() {
     showPresetInput.value = false;
@@ -24,6 +26,7 @@ export const useUIStore = defineStore("ui", () => {
     previewTab, isDragging, showSettings,
     showPresetInput, newPresetName,
     copySuccess, exportSuccess, exportFormat, maxFileKB, treeFilter, showExcludeEditor,
+    changedOnly, includeDiff,
     resetPresetUI,
   };
 });

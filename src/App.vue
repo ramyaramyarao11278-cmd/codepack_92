@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted } from "vue";
+import { ref, watch, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -12,16 +12,80 @@ import SettingsPanel from "./components/SettingsPanel.vue";
 import MetadataBar from "./components/MetadataBar.vue";
 import PresetBar from "./components/PresetBar.vue";
 import ExcludeRulesEditor from "./components/ExcludeRulesEditor.vue";
+import ReviewPromptBar from "./components/ReviewPromptBar.vue";
 import { useToast } from "./composables/useToast";
 import { useProjectStore } from "./stores/useProjectStore";
 import { useUIStore } from "./stores/useUIStore";
-import type { PackResult } from "./types";
+import type { PackResult, SecretMatch } from "./types";
 
 const toast = useToast();
 const project = useProjectStore();
 const ui = useUIStore();
 
 let unlistenDrop: (() => void) | null = null;
+
+// CodePack: 安全拦截对话框状态
+const securityDialog = ref({ show: false, action: '' as 'copy' | 'export' | '' });
+
+async function doMaskedExport(action: 'copy' | 'export') {
+  // Re-pack with masking: scan all checked files, mask content, then export
+  const paths = project.checkedFiles;
+  const result = await invoke<PackResult>("pack_files", {
+    paths,
+    projectPath: project.projectPath,
+    projectType: project.projectType,
+    format: ui.exportFormat,
+    maxFileBytes: ui.maxFileKB * 1024,
+  });
+  // Mask all secrets in the packed content
+  let content = result.content;
+  for (const matches of Object.values(project.secretsMap)) {
+    for (const m of matches) {
+      if (content.includes(m.match_content)) {
+        const prefix = m.match_content.substring(0, 3);
+        content = content.replaceAll(m.match_content, prefix + "******");
+      }
+    }
+  }
+  if (action === 'copy') {
+    await invoke("copy_to_clipboard", { content });
+    ui.copySuccess = true;
+    setTimeout(() => (ui.copySuccess = false), 2000);
+    toast.show({ type: "success", message: `已脱敏并复制 ${result.file_count} 个文件到剪贴板` });
+  } else {
+    const projectName = project.projectPath.replace(/\\/g, "/").split("/").pop() || "project";
+    const extMap = { plain: "txt", markdown: "md", xml: "xml" } as const;
+    const defaultExt = extMap[ui.exportFormat];
+    const savePath = await save({
+      title: "导出代码（已脱敏）",
+      defaultPath: `${project.projectPath}/../${projectName}_code.${defaultExt}`,
+      filters: [
+        { name: "Text", extensions: ["txt"] },
+        { name: "Markdown", extensions: ["md"] },
+        { name: "XML", extensions: ["xml"] },
+      ],
+    });
+    if (!savePath) return;
+    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+    await writeTextFile(savePath, content);
+    ui.exportSuccess = true;
+    setTimeout(() => (ui.exportSuccess = false), 2000);
+    toast.show({ type: "success", message: `已脱敏并导出到 ${savePath}` });
+  }
+}
+
+function onSecurityDialogChoice(choice: 'mask' | 'force' | 'cancel') {
+  const action = securityDialog.value.action;
+  securityDialog.value = { show: false, action: '' };
+  if (choice === 'cancel') return;
+  if (choice === 'mask') {
+    doMaskedExport(action as 'copy' | 'export');
+  } else {
+    // Force: proceed without masking
+    if (action === 'copy') doCopyToClipboard();
+    else doExportToFile();
+  }
+}
 
 onMounted(async () => {
   const appWindow = getCurrentWebviewWindow();
@@ -56,16 +120,23 @@ function formatTokens(n: number): string {
   return Math.round(n).toString();
 }
 
-// CodePack: 复制到剪贴板（优先使用编辑后的内容）
-async function onCopyToClipboard() {
+// CodePack: 安全检查 + 复制到剪贴板
+function onCopyToClipboard() {
   if (!project.fileTree) return;
-  const paths = project.checkedFiles;
-  if (paths.length === 0) {
+  if (project.checkedFiles.length === 0) {
     toast.show({ type: "info", message: "请先选择要导出的文件" });
     return;
   }
+  if (project.totalSecretCount > 0) {
+    securityDialog.value = { show: true, action: 'copy' };
+    return;
+  }
+  doCopyToClipboard();
+}
+
+async function doCopyToClipboard() {
+  const paths = project.checkedFiles;
   try {
-    // If user has edited the export preview, use that directly
     if (project.exportPreviewContent) {
       await invoke("copy_to_clipboard", { content: project.exportPreviewContent });
       ui.copySuccess = true;
@@ -73,13 +144,18 @@ async function onCopyToClipboard() {
       toast.show({ type: "success", message: "已复制编辑后的内容到剪贴板" });
       return;
     }
-    const result = await invoke<PackResult>("pack_files", {
+    const useExtended = ui.includeDiff || !!project.activeInstruction;
+    const packCmd = useExtended ? "pack_files_extended" : "pack_files";
+    const packArgs: Record<string, unknown> = {
       paths,
       projectPath: project.projectPath,
       projectType: project.projectType,
       format: ui.exportFormat,
       maxFileBytes: ui.maxFileKB * 1024,
-    });
+    };
+    if (ui.includeDiff) packArgs.includeDiff = true;
+    if (project.activeInstruction) packArgs.instruction = project.activeInstruction;
+    const result = await invoke<PackResult>(packCmd, packArgs);
     await invoke("copy_to_clipboard", { content: result.content });
     ui.copySuccess = true;
     setTimeout(() => (ui.copySuccess = false), 2000);
@@ -96,23 +172,32 @@ async function onCopyToClipboard() {
         duration: 4000,
       });
     }
+    const diffNote = ui.includeDiff ? " +Diff" : "";
     toast.show({
       type: "success",
-      message: `已复制 ${result.file_count} 个文件到剪贴板（${formatTokens(result.estimated_tokens)} tokens）`,
+      message: `已复制 ${result.file_count} 个文件到剪贴板（${formatTokens(result.estimated_tokens)} tokens${diffNote}）`,
     });
   } catch (e) {
     toast.show({ type: "error", message: `复制失败: ${e}` });
   }
 }
 
-// CodePack: 导出为文件（优先使用编辑后的内容）
-async function onExportToFile() {
+// CodePack: 安全检查 + 导出为文件
+function onExportToFile() {
   if (!project.fileTree) return;
-  const paths = project.checkedFiles;
-  if (paths.length === 0) {
+  if (project.checkedFiles.length === 0) {
     toast.show({ type: "info", message: "请先选择要导出的文件" });
     return;
   }
+  if (project.totalSecretCount > 0) {
+    securityDialog.value = { show: true, action: 'export' };
+    return;
+  }
+  doExportToFile();
+}
+
+async function doExportToFile() {
+  const paths = project.checkedFiles;
   try {
     const projectName = project.projectPath.replace(/\\/g, "/").split("/").pop() || "project";
     const extMap = { plain: "txt", markdown: "md", xml: "xml" } as const;
@@ -143,22 +228,38 @@ async function onExportToFile() {
       return;
     }
 
-    const resultPath = await invoke<string>("export_to_file", {
-      paths,
-      projectPath: project.projectPath,
-      projectType: project.projectType,
-      savePath,
-      format: ui.exportFormat,
-      maxFileBytes: ui.maxFileKB * 1024,
-    });
+    const useExtended = ui.includeDiff || !!project.activeInstruction;
+    if (useExtended) {
+      const extArgs: Record<string, unknown> = {
+        paths,
+        projectPath: project.projectPath,
+        projectType: project.projectType,
+        format: ui.exportFormat,
+        maxFileBytes: ui.maxFileKB * 1024,
+      };
+      if (ui.includeDiff) extArgs.includeDiff = true;
+      if (project.activeInstruction) extArgs.instruction = project.activeInstruction;
+      const result = await invoke<PackResult>("pack_files_extended", extArgs);
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      await writeTextFile(savePath, result.content);
+    } else {
+      await invoke<string>("export_to_file", {
+        paths,
+        projectPath: project.projectPath,
+        projectType: project.projectType,
+        savePath,
+        format: ui.exportFormat,
+        maxFileBytes: ui.maxFileKB * 1024,
+      });
+    }
     ui.exportSuccess = true;
     setTimeout(() => (ui.exportSuccess = false), 2000);
     toast.show({
       type: "success",
-      message: `已导出到 ${resultPath}`,
+      message: `已导出到 ${savePath}`,
       action: {
         label: "打开目录",
-        onClick: () => invoke("open_directory", { path: resultPath }),
+        onClick: () => invoke("open_directory", { path: savePath }),
       },
       duration: 5000,
     });
@@ -182,6 +283,58 @@ function onSavePreset() {
 function onCloseProject() {
   project.closeProject();
   ui.resetPresetUI();
+  ui.changedOnly = false;
+}
+
+function toggleChangedOnly() {
+  ui.changedOnly = !ui.changedOnly;
+  if (ui.changedOnly) {
+    project.contextAction('select-git-changed');
+  } else {
+    project.setAllChecked(project.fileTree!, true);
+    project.onTreeChanged();
+  }
+}
+
+// CodePack: 当前预览文件的敏感信息
+const currentFileSecrets = computed<SecretMatch[]>(() => {
+  if (!project.selectedFilePath || !project.secretsMap) return [];
+  // secretsMap uses relative paths, selectedFilePath is absolute
+  for (const [relPath, matches] of Object.entries(project.secretsMap)) {
+    if (project.selectedFilePath.replace(/\\/g, "/").endsWith(relPath)) {
+      return matches;
+    }
+  }
+  return [];
+});
+
+async function onMaskSecrets() {
+  if (!project.selectedFilePath) return;
+  const masked = await project.maskFileSecrets(project.selectedFilePath);
+  if (masked !== null) {
+    project.previewContent = masked;
+    toast.show({ type: "success", message: "已脱敏当前文件预览内容" });
+  }
+}
+
+function onExcludeFile() {
+  if (!project.fileTree || !project.selectedFilePath) return;
+  // Uncheck the current file in the tree
+  function uncheckFile(node: import("./types").FileNode, path: string) {
+    if (!node.is_dir && node.path === path) {
+      node.checked = false;
+      return true;
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        if (uncheckFile(child, path)) return true;
+      }
+    }
+    return false;
+  }
+  uncheckFile(project.fileTree, project.selectedFilePath);
+  project.onTreeChanged();
+  toast.show({ type: "info", message: "已从导出中排除此文件" });
 }
 
 // CodePack: 切换到导出预览 tab 或格式变化时自动刷新
@@ -278,6 +431,21 @@ watch(
             >
             <div class="flex items-center gap-2">
               <button
+                v-if="project.gitStatus?.is_repo"
+                class="flex items-center gap-1 px-1.5 py-0.5 text-xs rounded transition-colors"
+                :class="ui.changedOnly
+                  ? 'bg-yellow-400/15 text-yellow-400 border border-yellow-400/30'
+                  : 'text-dark-500 hover:text-yellow-400'"
+                :title="ui.changedOnly ? '显示全部文件' : '只选 Git 变更文件'"
+                @click="toggleChangedOnly"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                </svg>
+                <span v-if="ui.changedOnly">Changed</span>
+                <span v-if="project.gitStatus?.changed_files.length" class="text-yellow-400/70">{{ project.gitStatus.changed_files.filter(f => f.status !== 'deleted').length }}</span>
+              </button>
+              <button
                 class="text-dark-500 hover:text-yellow-400 transition-colors"
                 title="排除规则"
                 @click="ui.showExcludeEditor = true"
@@ -344,6 +512,7 @@ watch(
               :selected-path="project.selectedFilePath"
               :collapsed-state="project.collapsedState"
               :filter-text="ui.treeFilter"
+              :risky-files="project.riskyFiles"
               @select="onFileSelect"
               @toggle="project.onTreeChanged()"
               @context-action="project.contextAction"
@@ -354,6 +523,16 @@ watch(
 
       <!-- Code Preview (Right Panel) -->
       <div class="flex-1 flex flex-col overflow-hidden">
+        <!-- CodePack: Review 角色预设选择条 -->
+        <ReviewPromptBar
+          :prompts="project.reviewPrompts"
+          :active-prompt="project.activeReviewPrompt"
+          :has-files="!!project.fileTree"
+          @select="project.activeReviewPrompt = $event"
+          @deselect="project.activeReviewPrompt = ''"
+          @save="project.saveReviewPrompt($event)"
+          @delete="project.deleteReviewPrompt($event)"
+        />
         <CodePreview
           :content="project.previewContent"
           :file-path="project.selectedFilePath"
@@ -363,8 +542,11 @@ watch(
           :export-content="project.exportPreviewContent"
           :checked-count="project.checkedFiles.length"
           :checked-files="project.checkedFiles"
+          :secrets="currentFileSecrets"
           @update:active-tab="ui.previewTab = $event"
           @update:export-content="project.exportPreviewContent = $event"
+          @mask-secrets="onMaskSecrets"
+          @exclude-file="onExcludeFile"
         />
       </div>
     </div>
@@ -378,9 +560,12 @@ watch(
       :copy-success="ui.copySuccess"
       :export-success="ui.exportSuccess"
       :export-format="ui.exportFormat"
+      :include-diff="ui.includeDiff"
+      :is-git-repo="!!project.gitStatus?.is_repo"
       @copy="onCopyToClipboard"
       @export="onExportToFile"
       @update:export-format="ui.exportFormat = $event"
+      @update:include-diff="ui.includeDiff = $event"
     />
 
     <!-- CodePack: Toast 通知容器 -->
@@ -396,5 +581,42 @@ watch(
       @save="(r: string[]) => { project.saveExcludeRules(r); ui.showExcludeEditor = false; }"
       @close="ui.showExcludeEditor = false"
     />
+
+    <!-- CodePack: 安全拦截对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="securityDialog.show"
+        class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
+        @click.self="onSecurityDialogChoice('cancel')"
+      >
+        <div class="bg-dark-800 border border-dark-600 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-2xl">🛡️</span>
+            <h3 class="text-base font-semibold text-dark-100">检测到敏感信息</h3>
+          </div>
+          <p class="text-sm text-dark-300 mb-2">
+            在已选文件中检测到 <span class="text-red-400 font-medium">{{ project.totalSecretCount }}</span> 个潜在敏感信息
+            （{{ Object.keys(project.secretsMap).length }} 个文件）。
+          </p>
+          <p class="text-xs text-dark-500 mb-5">
+            包含 API Key、密码等敏感数据可能导致安全风险。建议脱敏后再发送给 AI。
+          </p>
+          <div class="flex items-center gap-2 justify-end">
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg bg-dark-700 text-dark-400 hover:bg-dark-600 hover:text-dark-200 transition-colors"
+              @click="onSecurityDialogChoice('cancel')"
+            >取消</button>
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors"
+              @click="onSecurityDialogChoice('force')"
+            >依然{{ securityDialog.action === 'copy' ? '复制' : '导出' }}</button>
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-medium"
+              @click="onSecurityDialogChoice('mask')"
+            >自动脱敏并{{ securityDialog.action === 'copy' ? '复制' : '导出' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

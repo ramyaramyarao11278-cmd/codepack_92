@@ -26,6 +26,7 @@ tiktoken-rs = "0.6"
 git2 = "0.19"
 tokio = { version = "1", features = ["rt", "sync"] }
 notify = "6"
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

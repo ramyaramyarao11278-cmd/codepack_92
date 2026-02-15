@@ -369,6 +369,7 @@ dependencies = [
  "git2",
  "ignore",
  "notify",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

@@ -90,6 +90,36 @@ pub struct ProjectMetadata {
     pub requirements: Vec<String>,
 }
 
+// CodePack: 敏感信息类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SecretType {
+    ApiKey,
+    PrivateKey,
+    Password,
+    GenericToken,
+}
+
+// CodePack: 敏感信息匹配结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretMatch {
+    pub line_number: usize,
+    pub match_content: String,
+    pub secret_type: SecretType,
+    pub description: String,
+    pub start_index: usize,
+    pub end_index: usize,
+}
+
+// CodePack: Review 角色预设
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewPrompt {
+    pub name: String,
+    pub icon: String,
+    pub instruction: String,
+    #[serde(default)]
+    pub builtin: bool,
+}
+
 // CodePack: 扫描进度事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanProgress {

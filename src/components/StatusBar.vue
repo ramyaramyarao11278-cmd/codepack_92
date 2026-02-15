@@ -12,12 +12,15 @@ const props = defineProps<{
   copySuccess: boolean;
   exportSuccess: boolean;
   exportFormat: ExportFormat;
+  includeDiff: boolean;
+  isGitRepo: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "copy"): void;
   (e: "export"): void;
   (e: "update:exportFormat", value: ExportFormat): void;
+  (e: "update:includeDiff", value: boolean): void;
 }>();
 
 const formatLabels: Record<ExportFormat, string> = {
@@ -90,6 +93,20 @@ const canAct = computed(() => props.hasFiles && props.fileCount > 0);
           @click="emit('update:exportFormat', fmt)"
         >{{ formatLabels[fmt] }}</button>
       </div>
+      <label
+        v-if="hasFiles && isGitRepo"
+        class="flex items-center gap-1 text-xs cursor-pointer select-none"
+        :class="includeDiff ? 'text-yellow-400' : 'text-dark-500 hover:text-dark-300'"
+        title="在导出中包含 Git Diff"
+      >
+        <input
+          type="checkbox"
+          :checked="includeDiff"
+          class="w-3 h-3 rounded border-dark-500 bg-dark-700 text-yellow-400 focus:ring-yellow-400/30 focus:ring-offset-0 cursor-pointer"
+          @change="emit('update:includeDiff', !includeDiff)"
+        />
+        Diff
+      </label>
       <button
         :disabled="!canAct"
         class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150"

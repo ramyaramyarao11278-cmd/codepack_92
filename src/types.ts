@@ -91,6 +91,26 @@ export interface PackResult {
   skipped_files: SkippedFile[];
 }
 
+// CodePack: 敏感信息类型
+export type SecretType = "ApiKey" | "PrivateKey" | "Password" | "GenericToken";
+
+export interface SecretMatch {
+  line_number: number;
+  match_content: string;
+  secret_type: SecretType;
+  description: string;
+  start_index: number;
+  end_index: number;
+}
+
+// CodePack: Review 角色预设
+export interface ReviewPrompt {
+  name: string;
+  icon: string;
+  instruction: string;
+  builtin: boolean;
+}
+
 // CodePack: 扫描进度事件
 export interface ScanProgress {
   phase: string;

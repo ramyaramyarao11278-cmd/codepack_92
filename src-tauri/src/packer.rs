@@ -167,6 +167,90 @@ pub fn build_pack_content_with_limit(
     }
 }
 
+/// Extended pack with optional git diff and instruction sections
+pub fn build_pack_content_extended(
+    paths: &[String],
+    project_path: &str,
+    project_type: &str,
+    format: &ExportFormat,
+    max_file_bytes: Option<u64>,
+    diffs: Option<&std::collections::HashMap<String, String>>,
+    instruction: Option<&str>,
+) -> PackResult {
+    let mut result = build_pack_content_with_limit(paths, project_path, project_type, format, max_file_bytes);
+
+    let mut extra = String::new();
+
+    // Append git diffs section
+    if let Some(diff_map) = diffs {
+        if !diff_map.is_empty() {
+            match format {
+                ExportFormat::Plain => {
+                    extra.push_str("# ===== Git Diff (Working Changes) =====\n\n");
+                    for (path, diff) in diff_map {
+                        extra.push_str(&format!("# --- {} ---\n", path));
+                        extra.push_str(diff);
+                        if !diff.ends_with('\n') { extra.push('\n'); }
+                        extra.push('\n');
+                    }
+                }
+                ExportFormat::Markdown => {
+                    extra.push_str("## Git Diff (Working Changes)\n\n");
+                    for (path, diff) in diff_map {
+                        extra.push_str(&format!("### {}\n\n```diff\n", path));
+                        extra.push_str(diff);
+                        if !diff.ends_with('\n') { extra.push('\n'); }
+                        extra.push_str("```\n\n");
+                    }
+                }
+                ExportFormat::Xml => {
+                    extra.push_str("<diffs>\n");
+                    for (path, diff) in diff_map {
+                        extra.push_str(&format!("<diff path=\"{}\">\n<![CDATA[\n", xml_escape(path)));
+                        extra.push_str(diff);
+                        if !diff.ends_with('\n') { extra.push('\n'); }
+                        extra.push_str("]]>\n</diff>\n");
+                    }
+                    extra.push_str("</diffs>\n\n");
+                }
+            }
+        }
+    }
+
+    // Append instruction section
+    if let Some(instr) = instruction {
+        if !instr.is_empty() {
+            match format {
+                ExportFormat::Plain => {
+                    extra.push_str("# ===== Review Instructions =====\n");
+                    extra.push_str(instr);
+                    if !instr.ends_with('\n') { extra.push('\n'); }
+                    extra.push('\n');
+                }
+                ExportFormat::Markdown => {
+                    extra.push_str("## Review Instructions\n\n");
+                    extra.push_str(instr);
+                    if !instr.ends_with('\n') { extra.push('\n'); }
+                    extra.push('\n');
+                }
+                ExportFormat::Xml => {
+                    extra.push_str("<instruction>\n<![CDATA[\n");
+                    extra.push_str(instr);
+                    if !instr.ends_with('\n') { extra.push('\n'); }
+                    extra.push_str("]]>\n</instruction>\n\n");
+                }
+            }
+        }
+    }
+
+    if !extra.is_empty() {
+        result.content.push_str(&extra);
+        result.estimated_tokens = BPE.encode_ordinary(&result.content).len() as f64;
+    }
+
+    result
+}
+
 fn build_header(
     meta: &ProjectMetadata,
     file_count: u32,

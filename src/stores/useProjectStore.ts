@@ -3,7 +3,7 @@ import { ref, reactive, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../composables/useToast";
 import { listen } from "@tauri-apps/api/event";
-import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat, GitStatus, ScanProgress } from "../types";
+import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat, GitStatus, ScanProgress, SecretMatch, ReviewPrompt } from "../types";
 
 export const useProjectStore = defineStore("project", () => {
   const toast = useToast();
@@ -37,6 +37,17 @@ export const useProjectStore = defineStore("project", () => {
 
   // ─── Git State ─────────────────────────────────────────────
   const gitStatus = ref<GitStatus | null>(null);
+
+  // ─── Security State ─────────────────────────────────────────
+  const secretsMap = ref<Record<string, SecretMatch[]>>({});
+  const riskyFiles = computed(() => new Set(Object.keys(secretsMap.value)));
+  const totalSecretCount = computed(() =>
+    Object.values(secretsMap.value).reduce((sum, arr) => sum + arr.length, 0)
+  );
+
+  // ─── Review Prompts ───────────────────────────────────────
+  const reviewPrompts = ref<ReviewPrompt[]>([]);
+  const activeReviewPrompt = ref("");
 
   // ─── File Watcher ──────────────────────────────────────────
   let unlistenFsChanged: (() => void) | null = null;
@@ -136,6 +147,10 @@ export const useProjectStore = defineStore("project", () => {
       exportPreviewContent.value = "";
       await loadPresets();
       fetchGitStatus();
+      // Scan for secrets
+      scanSecrets();
+      // Load review prompts
+      loadReviewPrompts();
       // Start file watcher
       await startWatching(path);
     } catch (e) {
@@ -387,6 +402,76 @@ export const useProjectStore = defineStore("project", () => {
     onTreeChanged();
   }
 
+  async function loadReviewPrompts() {
+    try {
+      reviewPrompts.value = await invoke<ReviewPrompt[]>("list_review_prompts_cmd");
+    } catch {
+      reviewPrompts.value = [];
+    }
+  }
+
+  async function saveReviewPrompt(prompt: ReviewPrompt) {
+    try {
+      await invoke("save_review_prompt_cmd", { prompt });
+      await loadReviewPrompts();
+      toast.show({ type: "success", message: `角色「${prompt.name}」已保存` });
+    } catch (e) {
+      toast.show({ type: "error", message: `保存失败: ${e}` });
+    }
+  }
+
+  async function deleteReviewPrompt(name: string) {
+    try {
+      await invoke("delete_review_prompt_cmd", { name });
+      if (activeReviewPrompt.value === name) activeReviewPrompt.value = "";
+      await loadReviewPrompts();
+      toast.show({ type: "success", message: `角色「${name}」已删除` });
+    } catch (e) {
+      toast.show({ type: "error", message: `删除失败: ${e}` });
+    }
+  }
+
+  const activeInstruction = computed(() => {
+    if (!activeReviewPrompt.value) return "";
+    const p = reviewPrompts.value.find((r) => r.name === activeReviewPrompt.value);
+    return p?.instruction || "";
+  });
+
+  async function scanSecrets() {
+    if (!fileTree.value || !projectPath.value) return;
+    const paths = getAllCheckedFiles(fileTree.value);
+    if (paths.length === 0) {
+      secretsMap.value = {};
+      return;
+    }
+    try {
+      const result = await invoke<Record<string, SecretMatch[]>>("scan_all_secrets_cmd", {
+        paths,
+        projectPath: projectPath.value,
+      });
+      secretsMap.value = result;
+      const count = Object.values(result).reduce((s, a) => s + a.length, 0);
+      if (count > 0) {
+        toast.show({
+          type: "info",
+          message: `⚠️ 检测到 ${count} 个潜在敏感信息（${Object.keys(result).length} 个文件）`,
+          duration: 5000,
+        });
+      }
+    } catch {
+      secretsMap.value = {};
+    }
+  }
+
+  async function maskFileSecrets(path: string): Promise<string | null> {
+    try {
+      const masked = await invoke<string>("mask_file_secrets_cmd", { path });
+      return masked;
+    } catch {
+      return null;
+    }
+  }
+
   async function startWatching(path: string) {
     // Stop previous watcher
     await stopWatching();
@@ -438,6 +523,8 @@ export const useProjectStore = defineStore("project", () => {
     // State
     projectPath, projectType, projectMetadata, fileTree,
     isScanning, isRefreshing, scanProgress, gitStatus, excludeRules,
+    secretsMap, riskyFiles, totalSecretCount,
+    reviewPrompts, activeReviewPrompt, activeInstruction,
     selectedFilePath, previewContent, selectedFileSize, isLoading,
     exportPreviewContent,
     previewTokenCount, totalBytes,
@@ -447,6 +534,8 @@ export const useProjectStore = defineStore("project", () => {
     checkedFiles, totalTokens,
     // Actions
     scanDirectory, refreshFileTree, selectFile, onTreeChanged, saveConfig, fetchGitStatus,
+    scanSecrets, maskFileSecrets,
+    loadReviewPrompts, saveReviewPrompt, deleteReviewPrompt,
     loadPresets, savePreset, loadPreset, deletePreset,
     refreshExportPreview, updateTokenEstimate,
     contextAction, closeProject, saveExcludeRules,

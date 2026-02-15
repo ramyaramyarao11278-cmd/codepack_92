@@ -5,9 +5,9 @@ use std::sync::LazyLock;
 
 use tiktoken_rs::CoreBPE;
 
-use crate::config::{chrono_now, load_app_config, save_app_config};
+use crate::config::{chrono_now, load_app_config, save_app_config, load_review_prompts, save_custom_review_prompt, delete_custom_review_prompt};
 use crate::metadata::extract_metadata;
-use crate::packer::build_pack_content_with_limit;
+use crate::packer::{build_pack_content_with_limit, build_pack_content_extended};
 
 static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
     tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
@@ -19,7 +19,7 @@ use crate::plugins::{
 use crate::scanner::{build_file_tree, count_files, detect_project_type_with_plugins};
 use crate::stats::compute_project_stats;
 use tauri::Emitter;
-use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ScanProgress, ScanResult, TokenEstimate};
+use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ReviewPrompt, ScanProgress, ScanResult, TokenEstimate};
 
 #[tauri::command]
 pub async fn scan_directory_async(
@@ -170,6 +170,29 @@ pub fn pack_files(
 ) -> Result<PackResult, String> {
     let fmt = format.unwrap_or_default();
     Ok(build_pack_content_with_limit(&paths, &project_path, &project_type, &fmt, max_file_bytes))
+}
+
+#[tauri::command]
+pub fn pack_files_extended(
+    paths: Vec<String>,
+    project_path: String,
+    project_type: String,
+    format: Option<ExportFormat>,
+    max_file_bytes: Option<u64>,
+    include_diff: Option<bool>,
+    instruction: Option<String>,
+) -> Result<PackResult, String> {
+    let fmt = format.unwrap_or_default();
+    let diffs = if include_diff.unwrap_or(false) {
+        let diff_map = crate::git::get_diffs_for_files(&project_path, &paths);
+        if diff_map.is_empty() { None } else { Some(diff_map) }
+    } else {
+        None
+    };
+    Ok(build_pack_content_extended(
+        &paths, &project_path, &project_type, &fmt, max_file_bytes,
+        diffs.as_ref(), instruction.as_deref(),
+    ))
 }
 
 #[tauri::command]
@@ -364,6 +387,71 @@ pub fn start_watching_cmd(app: tauri::AppHandle, project_path: String) -> Result
 #[tauri::command]
 pub fn stop_watching_cmd(app: tauri::AppHandle) -> Result<(), String> {
     crate::watcher::stop_watching(&app)
+}
+
+// ─── Security Commands ─────────────────────────────────────────
+
+#[tauri::command]
+pub fn scan_secrets_cmd(path: String) -> Result<Vec<crate::types::SecretMatch>, String> {
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    Ok(crate::security::scan_content(&content))
+}
+
+#[tauri::command]
+pub fn scan_all_secrets_cmd(
+    paths: Vec<String>,
+    project_path: String,
+) -> Result<HashMap<String, Vec<crate::types::SecretMatch>>, String> {
+    let root = Path::new(&project_path);
+    let mut result = HashMap::new();
+    for path in &paths {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let matches = crate::security::scan_content(&content);
+        if !matches.is_empty() {
+            let relative = Path::new(path)
+                .strip_prefix(root)
+                .unwrap_or(Path::new(path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            result.insert(relative, matches);
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn mask_file_secrets_cmd(path: String) -> Result<String, String> {
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let matches = crate::security::scan_content(&content);
+    Ok(crate::security::mask_secrets(&content, &matches))
+}
+
+// ─── Review Prompt Commands ────────────────────────────────────
+
+#[tauri::command]
+pub fn list_review_prompts_cmd() -> Result<Vec<ReviewPrompt>, String> {
+    Ok(load_review_prompts())
+}
+
+#[tauri::command]
+pub fn save_review_prompt_cmd(prompt: ReviewPrompt) -> Result<(), String> {
+    if prompt.builtin {
+        return Err("Cannot modify builtin prompts".to_string());
+    }
+    save_custom_review_prompt(&prompt)
+}
+
+#[tauri::command]
+pub fn delete_review_prompt_cmd(name: String) -> Result<(), String> {
+    // Check if it's a builtin
+    let builtins = load_review_prompts();
+    if builtins.iter().any(|p| p.name == name && p.builtin) {
+        return Err("Cannot delete builtin prompts".to_string());
+    }
+    delete_custom_review_prompt(&name)
 }
 
 // ─── Stats Command ─────────────────────────────────────────────

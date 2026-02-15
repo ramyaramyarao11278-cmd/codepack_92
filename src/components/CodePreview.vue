@@ -3,6 +3,7 @@
 import { computed, ref, watch } from "vue";
 import StatsPanel from "./StatsPanel.vue";
 import { useHighlighter } from "../composables/useHighlighter";
+import type { SecretMatch } from "../types";
 
 const { highlightedHtml, isHighlighting, highlight } = useHighlighter();
 
@@ -18,12 +19,26 @@ const props = defineProps<{
   exportContent: string;
   checkedCount: number;
   checkedFiles: string[];
+  secrets?: SecretMatch[];
 }>();
 
 const emit = defineEmits<{
   (e: "update:activeTab", tab: "file" | "export" | "stats"): void;
   (e: "update:exportContent", content: string): void;
+  (e: "mask-secrets"): void;
+  (e: "exclude-file"): void;
 }>();
+
+const secretsDismissed = ref(false);
+
+const secretLines = computed(() => {
+  if (!props.secrets || props.secrets.length === 0) return new Set<number>();
+  return new Set(props.secrets.map((s) => s.line_number));
+});
+
+watch(() => props.filePath, () => {
+  secretsDismissed.value = false;
+});
 
 function toggleEdit() {
   if (!isEditing.value) {
@@ -144,6 +159,28 @@ function formatSize(bytes: number): string {
 
     <!-- CodePack: 单文件预览模式 -->
     <template v-else-if="activeTab === 'file'">
+      <!-- Security Warning Bar -->
+      <div
+        v-if="secrets && secrets.length > 0 && !secretsDismissed"
+        class="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 shrink-0"
+      >
+        <span class="text-red-400 text-xs font-medium">⚠️ 检测到 {{ secrets.length }} 个潜在敏感信息</span>
+        <div class="ml-auto flex items-center gap-1.5">
+          <button
+            class="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors"
+            @click="emit('mask-secrets')"
+          >一键脱敏</button>
+          <button
+            class="px-2 py-0.5 text-xs rounded bg-dark-700 text-dark-400 hover:bg-dark-600 transition-colors"
+            @click="secretsDismissed = true"
+          >忽略</button>
+          <button
+            class="px-2 py-0.5 text-xs rounded bg-dark-700 text-dark-400 hover:bg-dark-600 transition-colors"
+            @click="emit('exclude-file')"
+          >排除此文件</button>
+        </div>
+      </div>
+
       <div v-if="isLoading" class="flex items-center justify-center flex-1">
         <div class="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
       </div>
@@ -168,7 +205,12 @@ function formatSize(bytes: number): string {
         <!-- CodePack: fallback plain text while highlighting -->
         <table v-else class="w-full border-collapse">
           <tbody>
-            <tr v-for="(line, idx) in lines" :key="idx" class="hover:bg-dark-800/30">
+            <tr
+              v-for="(line, idx) in lines"
+              :key="idx"
+              class="hover:bg-dark-800/30"
+              :class="{ 'bg-red-500/10': secretLines.has(idx + 1) }"
+            >
               <td class="sticky left-0 w-12 px-3 text-right text-dark-600 bg-dark-900 select-none border-r border-dark-800 shrink-0">
                 {{ idx + 1 }}
               </td>

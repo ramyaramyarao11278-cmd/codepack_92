@@ -90,6 +90,67 @@ pub fn get_changed_file_paths(project_path: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Returns unified diff for a single file relative to HEAD
+pub fn get_file_diff(project_path: &str, file_path: &str) -> Option<String> {
+    let repo = Repository::discover(project_path).ok()?;
+    let repo_root = repo.workdir()?.to_path_buf();
+
+    // Get relative path from repo root
+    let abs = Path::new(file_path);
+    let rel = abs.strip_prefix(&repo_root).ok()?;
+
+    // Diff working tree against HEAD
+    let head_tree = repo.head().ok()?.peel_to_tree().ok()?;
+    let mut diff_opts = git2::DiffOptions::new();
+    diff_opts.pathspec(rel.to_string_lossy().as_ref());
+
+    let diff = repo
+        .diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut diff_opts))
+        .ok()?;
+
+    let mut output = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        match origin {
+            '+' | '-' | ' ' => output.push(origin),
+            _ => {}
+        }
+        output.push_str(&String::from_utf8_lossy(line.content()));
+        true
+    })
+    .ok()?;
+
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
+    }
+}
+
+/// Returns diffs for all given file paths as a map of relative_path -> diff_string
+pub fn get_diffs_for_files(project_path: &str, file_paths: &[String]) -> std::collections::HashMap<String, String> {
+    let mut result = std::collections::HashMap::new();
+    let repo_root = Repository::discover(project_path)
+        .ok()
+        .and_then(|r| r.workdir().map(|p| p.to_path_buf()));
+    let root = match repo_root {
+        Some(r) => r,
+        None => return result,
+    };
+
+    for path in file_paths {
+        if let Some(diff) = get_file_diff(project_path, path) {
+            let rel = Path::new(path)
+                .strip_prefix(&root)
+                .unwrap_or(Path::new(path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            result.insert(rel, diff);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
