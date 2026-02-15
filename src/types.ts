@@ -63,6 +63,8 @@ export interface ProjectStats {
   languages: LangStat[];
 }
 
+export type ExportFormat = "plain" | "markdown" | "xml";
+
 // CodePack: pack_files 返回结构
 export interface PackResult {
   content: string;

@@ -35,6 +35,18 @@ pub struct AppConfig {
     pub projects: HashMap<String, ProjectConfig>,
 }
 
+// CodePack: 导出格式
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum ExportFormat {
+    #[default]
+    #[serde(rename = "plain")]
+    Plain,
+    #[serde(rename = "markdown")]
+    Markdown,
+    #[serde(rename = "xml")]
+    Xml,
+}
+
 // CodePack: pack_files 返回结构，包含统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackResult {

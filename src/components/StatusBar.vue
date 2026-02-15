@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import type { ExportFormat } from "../types";
+
 const props = defineProps<{
   fileCount: number;
   tokenCount: number;
@@ -9,12 +11,20 @@ const props = defineProps<{
   hasFiles: boolean;
   copySuccess: boolean;
   exportSuccess: boolean;
+  exportFormat: ExportFormat;
 }>();
 
 const emit = defineEmits<{
   (e: "copy"): void;
   (e: "export"): void;
+  (e: "update:exportFormat", value: ExportFormat): void;
 }>();
+
+const formatLabels: Record<ExportFormat, string> = {
+  plain: "Plain",
+  markdown: "Markdown",
+  xml: "XML",
+};
 
 function formatNumber(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
@@ -68,6 +78,18 @@ const canAct = computed(() => props.hasFiles && props.fileCount > 0);
 
     <!-- CodePack: 右侧操作按钮 -->
     <div class="flex items-center gap-2 shrink-0">
+      <!-- CodePack: 导出格式选择器 -->
+      <div v-if="hasFiles" class="flex items-center gap-0.5 bg-dark-800 rounded-md border border-dark-700 p-0.5">
+        <button
+          v-for="fmt in (['plain', 'markdown', 'xml'] as ExportFormat[])"
+          :key="fmt"
+          class="px-2 py-1 text-[11px] rounded transition-colors"
+          :class="exportFormat === fmt
+            ? 'bg-dark-600 text-dark-100'
+            : 'text-dark-500 hover:text-dark-300'"
+          @click="emit('update:exportFormat', fmt)"
+        >{{ formatLabels[fmt] }}</button>
+      </div>
       <button
         :disabled="!canAct"
         class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150"

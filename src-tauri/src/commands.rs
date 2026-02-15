@@ -11,7 +11,7 @@ use crate::plugins::{
 };
 use crate::scanner::{build_file_tree, count_files, detect_project_type_with_plugins};
 use crate::stats::compute_project_stats;
-use crate::types::{PackResult, ProjectConfig, ProjectStats, ScanResult, TokenEstimate};
+use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ScanResult, TokenEstimate};
 
 #[tauri::command]
 pub fn scan_directory(path: String) -> Result<ScanResult, String> {
@@ -89,8 +89,10 @@ pub fn pack_files(
     paths: Vec<String>,
     project_path: String,
     project_type: String,
+    #[allow(unused_variables)] format: Option<ExportFormat>,
 ) -> Result<PackResult, String> {
-    Ok(build_pack_content(&paths, &project_path, &project_type))
+    let fmt = format.unwrap_or_default();
+    Ok(build_pack_content(&paths, &project_path, &project_type, &fmt))
 }
 
 #[tauri::command]
@@ -107,8 +109,10 @@ pub fn export_to_file(
     project_path: String,
     project_type: String,
     save_path: String,
+    #[allow(unused_variables)] format: Option<ExportFormat>,
 ) -> Result<String, String> {
-    let result = build_pack_content(&paths, &project_path, &project_type);
+    let fmt = format.unwrap_or_default();
+    let result = build_pack_content(&paths, &project_path, &project_type, &fmt);
     fs::write(&save_path, &result.content)
         .map_err(|e| format!("Failed to export: {}", e))?;
     Ok(save_path)

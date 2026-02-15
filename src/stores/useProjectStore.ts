@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../composables/useToast";
-import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata } from "../types";
+import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat } from "../types";
 
 export const useProjectStore = defineStore("project", () => {
   const toast = useToast();
@@ -236,13 +236,13 @@ export const useProjectStore = defineStore("project", () => {
   }
 
   // ─── Export ──────────────────────────────────────────────────
-  async function refreshExportPreview() {
+  async function refreshExportPreview(format: ExportFormat = "plain") {
     if (!fileTree.value) return;
     const paths = getAllCheckedFiles(fileTree.value);
     if (paths.length === 0) { exportPreviewContent.value = ""; return; }
     try {
       const result = await invoke<PackResult>("pack_files", {
-        paths, projectPath: projectPath.value, projectType: projectType.value,
+        paths, projectPath: projectPath.value, projectType: projectType.value, format,
       });
       exportPreviewContent.value = result.content;
     } catch {

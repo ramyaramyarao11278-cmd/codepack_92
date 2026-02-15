@@ -68,6 +68,7 @@ async function onCopyToClipboard() {
       paths,
       projectPath: project.projectPath,
       projectType: project.projectType,
+      format: ui.exportFormat,
     });
     await invoke("copy_to_clipboard", { content: result.content });
     ui.copySuccess = true;
@@ -91,12 +92,15 @@ async function onExportToFile() {
   }
   try {
     const projectName = project.projectPath.replace(/\\/g, "/").split("/").pop() || "project";
+    const extMap = { plain: "txt", markdown: "md", xml: "xml" } as const;
+    const defaultExt = extMap[ui.exportFormat];
     const savePath = await save({
       title: "导出代码",
-      defaultPath: `${project.projectPath}/../${projectName}_code.txt`,
+      defaultPath: `${project.projectPath}/../${projectName}_code.${defaultExt}`,
       filters: [
         { name: "Text", extensions: ["txt"] },
         { name: "Markdown", extensions: ["md"] },
+        { name: "XML", extensions: ["xml"] },
       ],
     });
     if (!savePath) return;
@@ -105,6 +109,7 @@ async function onExportToFile() {
       projectPath: project.projectPath,
       projectType: project.projectType,
       savePath,
+      format: ui.exportFormat,
     });
     ui.exportSuccess = true;
     setTimeout(() => (ui.exportSuccess = false), 2000);
@@ -139,10 +144,10 @@ function onCloseProject() {
   ui.resetPresetUI();
 }
 
-// CodePack: 切换到导出预览 tab 时自动刷新
-watch(() => ui.previewTab, (tab) => {
-  if (tab === "export" && !project.exportPreviewContent && project.checkedFiles.length > 0) {
-    project.refreshExportPreview();
+// CodePack: 切换到导出预览 tab 或格式变化时自动刷新
+watch([() => ui.previewTab, () => ui.exportFormat], ([tab, _fmt]) => {
+  if (tab === "export" && project.checkedFiles.length > 0) {
+    project.refreshExportPreview(ui.exportFormat);
   }
 });
 
@@ -293,8 +298,10 @@ watch(
       :has-files="!!project.fileTree"
       :copy-success="ui.copySuccess"
       :export-success="ui.exportSuccess"
+      :export-format="ui.exportFormat"
       @copy="onCopyToClipboard"
       @export="onExportToFile"
+      @update:export-format="ui.exportFormat = $event"
     />
 
     <!-- CodePack: Toast 通知容器 -->

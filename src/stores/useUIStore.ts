@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import type { ExportFormat } from "../types";
 
 export const useUIStore = defineStore("ui", () => {
   const previewTab = ref<"file" | "export" | "stats">("file");
@@ -9,6 +10,7 @@ export const useUIStore = defineStore("ui", () => {
   const newPresetName = ref("");
   const copySuccess = ref(false);
   const exportSuccess = ref(false);
+  const exportFormat = ref<ExportFormat>("plain");
 
   function resetPresetUI() {
     showPresetInput.value = false;
@@ -18,7 +20,7 @@ export const useUIStore = defineStore("ui", () => {
   return {
     previewTab, isDragging, showSettings,
     showPresetInput, newPresetName,
-    copySuccess, exportSuccess,
+    copySuccess, exportSuccess, exportFormat,
     resetPresetUI,
   };
 });
