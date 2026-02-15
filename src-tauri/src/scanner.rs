@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use ignore::overrides::OverrideBuilder;
+use ignore::WalkBuilder;
 
 use crate::plugins::PluginDef;
 use crate::types::FileNode;
@@ -170,7 +174,7 @@ pub fn detect_project_type(root: &Path) -> String {
     "通用".to_string()
 }
 
-// ─── File Tree ─────────────────────────────────────────────────
+// ─── File Tree (ignore crate powered) ──────────────────────────
 
 pub fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions: &[String]) -> FileNode {
     let root_name = root
@@ -178,57 +182,115 @@ pub fn build_file_tree(root: &Path, extra_excludes: &[String], extra_extensions:
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| root.to_string_lossy().to_string());
 
+    let root_path = root.to_string_lossy().to_string();
+
     let mut root_node = FileNode {
         name: root_name,
-        path: root.to_string_lossy().to_string(),
+        path: root_path.clone(),
         is_dir: true,
         children: Vec::new(),
         checked: true,
     };
 
-    build_tree_recursive(root, &mut root_node, extra_excludes, extra_extensions);
-    sort_tree(&mut root_node);
-    root_node
-}
+    // Build override rules to exclude directories
+    let mut override_builder = OverrideBuilder::new(root);
+    for dir in EXCLUDED_DIRS {
+        let _ = override_builder.add(&format!("!{}/**", dir));
+    }
+    for dir in extra_excludes {
+        let _ = override_builder.add(&format!("!{}/**", dir));
+    }
+    // Use ignore::WalkBuilder for parallel traversal + .gitignore support
+    let mut walk_builder = WalkBuilder::new(root);
+    walk_builder
+        .hidden(true)       // skip hidden files/dirs (. prefixed)
+        .git_ignore(true)   // respect .gitignore
+        .git_global(false)
+        .git_exclude(true)
+        .sort_by_file_name(|a, b| a.cmp(b));
 
-fn build_tree_recursive(dir: &Path, parent: &mut FileNode, extra_excludes: &[String], extra_extensions: &[String]) {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
+    if let Ok(overrides) = override_builder.build() {
+        walk_builder.overrides(overrides);
+    }
 
-    let mut entries_vec: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries_vec.sort_by_key(|a| a.file_name());
+    let walker = walk_builder.build();
 
-    for entry in entries_vec {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
+    // Collect all valid entries into a flat list
+    let mut dir_children: HashMap<PathBuf, Vec<FileNode>> = HashMap::new();
+    let mut seen_dirs: Vec<PathBuf> = Vec::new();
 
-        if path.is_dir() {
+    for result in walker {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let path = entry.path().to_path_buf();
+        // Skip the root itself
+        if path == root {
+            continue;
+        }
+
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let parent_path = path.parent().unwrap_or(root).to_path_buf();
+
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            // Check our custom exclusion list (ignore crate handles .gitignore)
             if is_excluded_dir(&name, extra_excludes) {
                 continue;
             }
-            let mut dir_node = FileNode {
-                name,
-                path: path.to_string_lossy().to_string(),
-                is_dir: true,
-                children: Vec::new(),
-                checked: true,
-            };
-            build_tree_recursive(&path, &mut dir_node, extra_excludes, extra_extensions);
-            if !dir_node.children.is_empty() {
-                parent.children.push(dir_node);
+            seen_dirs.push(path.clone());
+            dir_children.entry(path).or_default();
+        } else {
+            // Only include source files
+            if !is_source_file(&name, extra_extensions) {
+                continue;
             }
-        } else if is_source_file(&name, extra_extensions) {
-            parent.children.push(FileNode {
+            let file_node = FileNode {
                 name,
                 path: path.to_string_lossy().to_string(),
                 is_dir: false,
                 children: Vec::new(),
                 checked: true,
-            });
+            };
+            dir_children.entry(parent_path).or_default().push(file_node);
         }
     }
+
+    // Build tree bottom-up: process dirs from deepest to shallowest
+    seen_dirs.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
+
+    for dir_path in &seen_dirs {
+        let children = dir_children.remove(dir_path).unwrap_or_default();
+        if children.is_empty() {
+            continue;
+        }
+        let dir_name = dir_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let dir_node = FileNode {
+            name: dir_name,
+            path: dir_path.to_string_lossy().to_string(),
+            is_dir: true,
+            children,
+            checked: true,
+        };
+        let parent = dir_path.parent().unwrap_or(root).to_path_buf();
+        dir_children.entry(parent).or_default().push(dir_node);
+    }
+
+    // Attach remaining children to root
+    if let Some(children) = dir_children.remove(&root.to_path_buf()) {
+        root_node.children = children;
+    }
+
+    sort_tree(&mut root_node);
+    root_node
 }
 
 fn sort_tree(node: &mut FileNode) {
