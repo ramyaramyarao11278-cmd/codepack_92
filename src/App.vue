@@ -9,12 +9,13 @@ import CodePreview from "./components/CodePreview.vue";
 import StatusBar from "./components/StatusBar.vue";
 import ToastContainer from "./components/ToastContainer.vue";
 import { useToast } from "./composables/useToast";
-import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate } from "./types";
+import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata } from "./types";
 
 const toast = useToast();
 
 const projectPath = ref<string>("");
 const projectType = ref<string>("");
+const projectMetadata = ref<ProjectMetadata | null>(null);
 const fileTree = ref<FileNode | null>(null);
 const selectedFilePath = ref<string>("");
 const previewContent = ref<string>("");
@@ -31,6 +32,11 @@ const exportSuccess = ref(false);
 const collapsedState = reactive<Record<string, boolean>>({});
 // CodePack: 刷新中状态
 const isRefreshing = ref(false);
+// CodePack: Preset 状态
+const presets = ref<Record<string, string[]>>({});
+const activePreset = ref<string>("");
+const showPresetInput = ref(false);
+const newPresetName = ref("");
 
 function getAllCheckedFiles(node: FileNode): string[] {
   const result: string[] = [];
@@ -85,6 +91,7 @@ async function onFolderDrop(path: string) {
   try {
     const result = await invoke<ScanResult>("scan_directory", { path });
     projectType.value = result.project_type;
+    projectMetadata.value = result.metadata;
     fileTree.value = result.tree;
     try {
       const config = await invoke<ProjectConfig | null>("load_project_config", {
@@ -102,6 +109,8 @@ async function onFolderDrop(path: string) {
     previewContent.value = "";
     previewTab.value = "file";
     exportPreviewContent.value = "";
+    // CodePack: 加载 presets
+    await loadPresets();
   } catch (e) {
     toast.show({ type: "error", message: `扫描失败: ${e}` });
   } finally {
@@ -149,6 +158,7 @@ async function refreshFileTree() {
   try {
     const result = await invoke<ScanResult>("scan_directory", { path: projectPath.value });
     projectType.value = result.project_type;
+    projectMetadata.value = result.metadata;
     fileTree.value = result.tree;
 
     // 新文件默认不勾选，已有文件恢复旧勾选状态
@@ -236,6 +246,70 @@ async function saveConfig() {
     });
   } catch (e) {
     console.error("Save config failed:", e);
+  }
+}
+
+// CodePack: Preset 管理函数
+async function loadPresets() {
+  if (!projectPath.value) return;
+  try {
+    const result = await invoke<Record<string, string[]>>("list_presets", {
+      projectPath: projectPath.value,
+    });
+    presets.value = result;
+    activePreset.value = "";
+  } catch {
+    presets.value = {};
+  }
+}
+
+async function onSavePreset() {
+  const name = newPresetName.value.trim();
+  if (!name || !fileTree.value || !projectPath.value) return;
+  const paths = getAllCheckedFiles(fileTree.value);
+  if (paths.length === 0) {
+    toast.show({ type: "info", message: "请先选择文件再保存预设" });
+    return;
+  }
+  try {
+    await invoke("save_preset", {
+      projectPath: projectPath.value,
+      presetName: name,
+      checkedPaths: paths,
+    });
+    presets.value[name] = paths;
+    activePreset.value = name;
+    showPresetInput.value = false;
+    newPresetName.value = "";
+    toast.show({ type: "success", message: `预设「${name}」已保存` });
+  } catch (e) {
+    toast.show({ type: "error", message: `保存预设失败: ${e}` });
+  }
+}
+
+async function onLoadPreset(name: string) {
+  if (!fileTree.value || !presets.value[name]) return;
+  const paths = presets.value[name];
+  restoreCheckedState(fileTree.value, paths);
+  fileTree.value = { ...fileTree.value };
+  activePreset.value = name;
+  exportPreviewContent.value = "";
+  saveConfig();
+  toast.show({ type: "success", message: `已切换到预设「${name}」` });
+}
+
+async function onDeletePreset(name: string) {
+  if (!projectPath.value) return;
+  try {
+    await invoke("delete_preset", {
+      projectPath: projectPath.value,
+      presetName: name,
+    });
+    delete presets.value[name];
+    if (activePreset.value === name) activePreset.value = "";
+    toast.show({ type: "success", message: `预设「${name}」已删除` });
+  } catch (e) {
+    toast.show({ type: "error", message: `删除预设失败: ${e}` });
   }
 }
 
@@ -469,6 +543,25 @@ watch(
       </div>
     </header>
 
+    <!-- CodePack: 项目元数据信息栏 -->
+    <div
+      v-if="projectMetadata && (projectMetadata.version || projectMetadata.dependencies.length > 0)"
+      class="flex items-center gap-4 px-5 py-1.5 border-b border-dark-700 bg-dark-900/80 text-xs text-dark-400 shrink-0 overflow-x-auto"
+    >
+      <span v-if="projectMetadata.version" class="flex items-center gap-1 shrink-0">
+        <span class="text-dark-500">v</span>
+        <span class="text-dark-300">{{ projectMetadata.version }}</span>
+      </span>
+      <span v-if="projectMetadata.entry_point" class="flex items-center gap-1 shrink-0">
+        <span class="text-dark-500">入口</span>
+        <span class="text-emerald-400/70">{{ projectMetadata.entry_point }}</span>
+      </span>
+      <span v-if="projectMetadata.dependencies.length > 0" class="flex items-center gap-1 truncate">
+        <span class="text-dark-500 shrink-0">依赖</span>
+        <span class="text-dark-300 truncate">{{ projectMetadata.dependencies.slice(0, 8).join(', ') }}<span v-if="projectMetadata.dependencies.length > 8" class="text-dark-500"> +{{ projectMetadata.dependencies.length - 8 }}</span></span>
+      </span>
+    </div>
+
     <!-- Main Content -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Drop Zone / File Tree (Left Panel) -->
@@ -507,13 +600,77 @@ watch(
                   fileTree = null;
                   projectPath = '';
                   projectType = '';
+                  projectMetadata = null;
                   previewContent = '';
                   exportPreviewContent = '';
+                  presets = {};
+                  activePreset = '';
+                  showPresetInput = false;
                 "
               >
                 ✕ Close
               </button>
             </div>
+          </div>
+          <!-- CodePack: Preset 切换栏 -->
+          <div
+            v-if="Object.keys(presets).length > 0 || showPresetInput"
+            class="px-3 py-1.5 border-b border-dark-700 bg-dark-850 flex flex-col gap-1.5"
+          >
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button
+                v-for="name in Object.keys(presets)"
+                :key="name"
+                class="group flex items-center gap-1 px-2 py-0.5 text-xs rounded-md border transition-colors"
+                :class="
+                  activePreset === name
+                    ? 'bg-emerald-400/15 text-emerald-400 border-emerald-400/30'
+                    : 'bg-dark-800 text-dark-400 border-dark-600 hover:text-dark-200 hover:border-dark-500'
+                "
+                @click="onLoadPreset(name)"
+              >
+                {{ name }}
+                <span
+                  class="text-dark-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity ml-0.5"
+                  @click.stop="onDeletePreset(name)"
+                  title="删除预设"
+                >✕</span>
+              </button>
+              <button
+                v-if="!showPresetInput"
+                class="px-1.5 py-0.5 text-xs text-dark-500 hover:text-emerald-400 border border-dashed border-dark-600 hover:border-emerald-400/30 rounded-md transition-colors"
+                @click="showPresetInput = true"
+                title="保存当前选择为预设"
+              >+</button>
+            </div>
+            <div v-if="showPresetInput" class="flex items-center gap-1.5">
+              <input
+                v-model="newPresetName"
+                class="flex-1 px-2 py-1 text-xs bg-dark-800 border border-dark-600 rounded-md text-dark-200 placeholder-dark-500 focus:outline-none focus:border-emerald-400/50"
+                placeholder="预设名称..."
+                @keyup.enter="onSavePreset"
+                @keyup.escape="showPresetInput = false; newPresetName = ''"
+              />
+              <button
+                class="px-2 py-1 text-xs bg-emerald-400/15 text-emerald-400 rounded-md hover:bg-emerald-400/25 transition-colors"
+                @click="onSavePreset"
+              >保存</button>
+              <button
+                class="px-2 py-1 text-xs text-dark-500 hover:text-dark-300 transition-colors"
+                @click="showPresetInput = false; newPresetName = ''"
+              >取消</button>
+            </div>
+          </div>
+          <!-- CodePack: 无预设时显示保存入口 -->
+          <div
+            v-else-if="fileTree"
+            class="px-3 py-1 border-b border-dark-700 bg-dark-850"
+          >
+            <button
+              class="text-xs text-dark-500 hover:text-emerald-400 transition-colors"
+              @click="showPresetInput = true"
+              title="保存当前选择为预设"
+            >+ 保存预设</button>
           </div>
           <div class="flex-1 overflow-auto p-2">
             <FileTree
