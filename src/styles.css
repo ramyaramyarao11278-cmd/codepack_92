@@ -32,6 +32,38 @@
   }
 }
 
+/* CodePack: shiki syntax highlighting styles */
+.shiki-preview pre {
+  margin: 0;
+  padding: 1rem;
+  background: transparent !important;
+  overflow-x: auto;
+}
+.shiki-preview code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  counter-reset: line;
+}
+.shiki-preview code .line {
+  display: inline-block;
+  width: 100%;
+  padding: 0 0.5rem;
+}
+.shiki-preview code .line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.shiki-preview code .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3rem;
+  margin-right: 1rem;
+  text-align: right;
+  color: #565869;
+  user-select: none;
+}
+
 /* CodePack: 刷新按钮旋转动画 */
 @keyframes spin-slow {
   from { transform: rotate(0deg); }

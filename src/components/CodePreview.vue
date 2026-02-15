@@ -1,7 +1,10 @@
 <!-- CodePack: 三模式预览组件（单文件预览 + 导出预览 + 统计） -->
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import StatsPanel from "./StatsPanel.vue";
+import { useHighlighter } from "../composables/useHighlighter";
+
+const { highlightedHtml, isHighlighting, highlight } = useHighlighter();
 
 const props = defineProps<{
   content: string;
@@ -22,6 +25,16 @@ const lines = computed(() => {
   if (!props.content) return [];
   return props.content.split("\n");
 });
+
+// CodePack: trigger shiki highlighting when file content or path changes
+watch(
+  [() => props.content, () => props.filePath],
+  ([code, path]) => {
+    if (code && path) highlight(code, path);
+    else highlightedHtml.value = "";
+  },
+  { immediate: true }
+);
 
 const exportLines = computed(() => {
   if (!props.exportContent) return [];
@@ -103,7 +116,14 @@ function formatSize(bytes: number): string {
       </div>
 
       <div v-else class="flex-1 overflow-auto font-mono text-xs leading-5">
-        <table class="w-full border-collapse">
+        <!-- CodePack: shiki syntax highlighted preview -->
+        <div
+          v-if="highlightedHtml && !isHighlighting"
+          class="shiki-preview"
+          v-html="highlightedHtml"
+        />
+        <!-- CodePack: fallback plain text while highlighting -->
+        <table v-else class="w-full border-collapse">
           <tbody>
             <tr v-for="(line, idx) in lines" :key="idx" class="hover:bg-dark-800/30">
               <td class="sticky left-0 w-12 px-3 text-right text-dark-600 bg-dark-900 select-none border-r border-dark-800 shrink-0">
