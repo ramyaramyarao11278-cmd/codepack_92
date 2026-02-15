@@ -1,10 +1,17 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use tiktoken_rs::CoreBPE;
 
 use crate::config::{chrono_now, load_app_config, save_app_config};
 use crate::metadata::extract_metadata;
 use crate::packer::build_pack_content;
+
+static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
+    tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
+});
 use crate::plugins::{
     get_plugin_excluded_dirs, get_plugin_source_extensions, get_plugins_dir, load_plugins,
     PluginDef,
@@ -73,13 +80,16 @@ pub fn load_project_config(project_path: String) -> Result<Option<ProjectConfig>
 #[tauri::command]
 pub fn estimate_tokens(paths: Vec<String>) -> Result<TokenEstimate, String> {
     let mut total_bytes: u64 = 0;
+    let mut total_tokens: usize = 0;
+    let bpe = &*BPE;
     for path in &paths {
-        if let Ok(meta) = fs::metadata(path) {
-            total_bytes += meta.len();
+        if let Ok(content) = fs::read_to_string(path) {
+            total_bytes += content.len() as u64;
+            total_tokens += bpe.encode_ordinary(&content).len();
         }
     }
     Ok(TokenEstimate {
-        tokens: total_bytes as f64 / 4.0,
+        tokens: total_tokens as f64,
         total_bytes,
     })
 }

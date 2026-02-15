@@ -1,9 +1,16 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use tiktoken_rs::CoreBPE;
 
 use crate::metadata::extract_metadata;
 use crate::types::{ExportFormat, PackResult, ProjectMetadata};
+
+static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
+    tiktoken_rs::cl100k_base().expect("failed to load cl100k_base tokenizer")
+});
 
 pub fn build_pack_content(
     paths: &[String],
@@ -62,7 +69,7 @@ pub fn build_pack_content(
         }
     }
 
-    let estimated_tokens = total_bytes as f64 / 4.0;
+    let estimated_tokens = BPE.encode_ordinary(&body).len() as f64;
 
     // Collect relative paths for tree overview
     let relative_paths: Vec<String> = paths
