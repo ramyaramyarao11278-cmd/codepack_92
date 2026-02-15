@@ -207,6 +207,9 @@ function getFileIcon(name: string, isDir: boolean): string {
         <button class="w-full px-3 py-1.5 text-xs text-left text-dark-200 hover:bg-dark-700 transition-colors" @click="onMenuAction('select-config')">
           只选配置文件
         </button>
+        <button class="w-full px-3 py-1.5 text-xs text-left text-emerald-400 hover:bg-dark-700 transition-colors" @click="onMenuAction('select-git-changed')">
+          只选 Git 变更文件
+        </button>
         <div class="my-1 border-t border-dark-700" />
         <button class="w-full px-3 py-1.5 text-xs text-left text-dark-200 hover:bg-dark-700 transition-colors" @click="onMenuAction('expand-all')">
           展开全部

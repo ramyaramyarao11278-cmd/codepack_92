@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../composables/useToast";
-import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat } from "../types";
+import type { FileNode, ScanResult, ProjectConfig, PackResult, TokenEstimate, ProjectMetadata, ExportFormat, GitStatus } from "../types";
 
 export const useProjectStore = defineStore("project", () => {
   const toast = useToast();
@@ -29,6 +29,9 @@ export const useProjectStore = defineStore("project", () => {
   // ─── Presets ─────────────────────────────────────────────────
   const presets = ref<Record<string, string[]>>({});
   const activePreset = ref("");
+
+  // ─── Git State ─────────────────────────────────────────────
+  const gitStatus = ref<GitStatus | null>(null);
 
   // ─── Shared Collapse State ───────────────────────────────────
   const collapsedState = reactive<Record<string, boolean>>({});
@@ -112,6 +115,7 @@ export const useProjectStore = defineStore("project", () => {
       previewContent.value = "";
       exportPreviewContent.value = "";
       await loadPresets();
+      fetchGitStatus();
     } catch (e) {
       toast.show({ type: "error", message: `扫描失败: ${e}` });
     } finally {
@@ -267,6 +271,17 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  // ─── Git ───────────────────────────────────────────────────
+  async function fetchGitStatus() {
+    if (!projectPath.value) { gitStatus.value = null; return; }
+    try {
+      const result = await invoke<GitStatus | null>("get_git_status_cmd", { projectPath: projectPath.value });
+      gitStatus.value = result;
+    } catch {
+      gitStatus.value = null;
+    }
+  }
+
   // ─── Context Actions ────────────────────────────────────────
   const SOURCE_EXTS = new Set([
     "rs","ts","tsx","js","jsx","vue","svelte","py","kt","kts","java","dart","go",
@@ -317,6 +332,19 @@ export const useProjectStore = defineStore("project", () => {
           return CONFIG_EXTS.has(e);
         });
         break;
+      case "select-git-changed":
+        if (gitStatus.value && gitStatus.value.changed_files.length > 0) {
+          const changedPaths = new Set(
+            gitStatus.value.changed_files
+              .filter((f) => f.status !== "deleted")
+              .map((f) => f.path.replace(/\//g, "\\"))
+          );
+          selectByFilter(fileTree.value, (n) => changedPaths.has(n.path) || changedPaths.has(n.path.replace(/\\/g, "/")));
+        } else {
+          toast.show({ type: "info", message: "未检测到 Git 变更文件" });
+          return;
+        }
+        break;
       case "expand-all": setAllCollapsed(fileTree.value, false); return;
       case "collapse-all": setAllCollapsed(fileTree.value, true); return;
       default: return;
@@ -338,7 +366,7 @@ export const useProjectStore = defineStore("project", () => {
   return {
     // State
     projectPath, projectType, projectMetadata, fileTree,
-    isScanning, isRefreshing,
+    isScanning, isRefreshing, gitStatus,
     selectedFilePath, previewContent, selectedFileSize, isLoading,
     exportPreviewContent,
     previewTokenCount, totalBytes,
@@ -347,7 +375,7 @@ export const useProjectStore = defineStore("project", () => {
     // Computed
     checkedFiles, totalTokens,
     // Actions
-    scanDirectory, refreshFileTree, selectFile, onTreeChanged, saveConfig,
+    scanDirectory, refreshFileTree, selectFile, onTreeChanged, saveConfig, fetchGitStatus,
     loadPresets, savePreset, loadPreset, deletePreset,
     refreshExportPreview, updateTokenEstimate,
     contextAction, closeProject,

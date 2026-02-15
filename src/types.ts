@@ -65,6 +65,17 @@ export interface ProjectStats {
 
 export type ExportFormat = "plain" | "markdown" | "xml";
 
+export interface ChangedFile {
+  path: string;
+  status: string;
+}
+
+export interface GitStatus {
+  is_repo: boolean;
+  branch: string;
+  changed_files: ChangedFile[];
+}
+
 export interface SkippedFile {
   path: string;
   reason: string;

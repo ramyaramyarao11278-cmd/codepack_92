@@ -5,6 +5,7 @@ pub mod scanner;
 pub mod metadata;
 pub mod stats;
 pub mod packer;
+pub mod git;
 pub mod commands;
 
 use commands::*;
@@ -32,6 +33,7 @@ pub fn run() {
             save_plugin,
             delete_plugin,
             get_project_stats,
+            get_git_status_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

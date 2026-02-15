@@ -247,6 +247,13 @@ pub fn delete_plugin(name: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Git Command ───────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_git_status_cmd(project_path: String) -> Result<Option<crate::git::GitStatus>, String> {
+    Ok(crate::git::get_git_status(&project_path))
+}
+
 // ─── Stats Command ─────────────────────────────────────────────
 
 #[tauri::command]
