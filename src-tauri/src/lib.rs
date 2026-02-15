@@ -33,6 +33,8 @@ pub fn run() {
             save_plugin,
             delete_plugin,
             get_project_stats,
+            save_exclude_rules,
+            load_exclude_rules,
             get_git_status_cmd,
         ])
         .run(tauri::generate_context!())

@@ -30,6 +30,9 @@ export const useProjectStore = defineStore("project", () => {
   const presets = ref<Record<string, string[]>>({});
   const activePreset = ref("");
 
+  // ─── Exclude Rules ─────────────────────────────────────────────
+  const excludeRules = ref<string[]>([]);
+
   // ─── Git State ─────────────────────────────────────────────
   const gitStatus = ref<GitStatus | null>(null);
 
@@ -97,7 +100,9 @@ export const useProjectStore = defineStore("project", () => {
     projectPath.value = path;
     isScanning.value = true;
     try {
-      const result = await invoke<ScanResult>("scan_directory", { path });
+      const rules = await invoke<string[]>("load_exclude_rules", { projectPath: path });
+      excludeRules.value = rules;
+      const result = await invoke<ScanResult>("scan_directory", { path, customExcludes: rules });
       projectType.value = result.project_type;
       projectMetadata.value = result.metadata;
       fileTree.value = result.tree;
@@ -129,7 +134,7 @@ export const useProjectStore = defineStore("project", () => {
     const oldChecked = new Set(getAllCheckedFiles(fileTree.value));
     const oldAllFiles = collectAllFilePaths(fileTree.value);
     try {
-      const result = await invoke<ScanResult>("scan_directory", { path: projectPath.value });
+      const result = await invoke<ScanResult>("scan_directory", { path: projectPath.value, customExcludes: excludeRules.value });
       projectType.value = result.project_type;
       projectMetadata.value = result.metadata;
       fileTree.value = result.tree;
@@ -271,6 +276,19 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  // ─── Exclude Rules ─────────────────────────────────────────
+  async function saveExcludeRules(rules: string[]) {
+    if (!projectPath.value) return;
+    excludeRules.value = rules;
+    try {
+      await invoke("save_exclude_rules", { projectPath: projectPath.value, rules });
+      toast.show({ type: "success", message: `已保存 ${rules.length} 条排除规则` });
+      await refreshFileTree();
+    } catch (e) {
+      toast.show({ type: "error", message: `保存排除规则失败: ${e}` });
+    }
+  }
+
   // ─── Git ───────────────────────────────────────────────────
   async function fetchGitStatus() {
     if (!projectPath.value) { gitStatus.value = null; return; }
@@ -366,7 +384,7 @@ export const useProjectStore = defineStore("project", () => {
   return {
     // State
     projectPath, projectType, projectMetadata, fileTree,
-    isScanning, isRefreshing, gitStatus,
+    isScanning, isRefreshing, gitStatus, excludeRules,
     selectedFilePath, previewContent, selectedFileSize, isLoading,
     exportPreviewContent,
     previewTokenCount, totalBytes,
@@ -378,7 +396,7 @@ export const useProjectStore = defineStore("project", () => {
     scanDirectory, refreshFileTree, selectFile, onTreeChanged, saveConfig, fetchGitStatus,
     loadPresets, savePreset, loadPreset, deletePreset,
     refreshExportPreview, updateTokenEstimate,
-    contextAction, closeProject,
+    contextAction, closeProject, saveExcludeRules,
     setAllChecked, restoreCheckedState,
   };
 });

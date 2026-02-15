@@ -21,7 +21,7 @@ use crate::stats::compute_project_stats;
 use crate::types::{ExportFormat, PackResult, ProjectConfig, ProjectStats, ScanResult, TokenEstimate};
 
 #[tauri::command]
-pub fn scan_directory(path: String) -> Result<ScanResult, String> {
+pub fn scan_directory(path: String, custom_excludes: Option<Vec<String>>) -> Result<ScanResult, String> {
     let root = Path::new(&path);
     if !root.exists() || !root.is_dir() {
         return Err("Path does not exist or is not a directory".to_string());
@@ -29,7 +29,10 @@ pub fn scan_directory(path: String) -> Result<ScanResult, String> {
 
     let plugins = load_plugins();
     let project_type = detect_project_type_with_plugins(root, &plugins);
-    let extra_excludes = get_plugin_excluded_dirs(&plugins);
+    let mut extra_excludes = get_plugin_excluded_dirs(&plugins);
+    if let Some(custom) = custom_excludes {
+        extra_excludes.extend(custom);
+    }
     let extra_extensions = get_plugin_source_extensions(&plugins);
     let tree = build_file_tree(root, &extra_excludes, &extra_extensions);
     let total_files = count_files(&tree);
@@ -245,6 +248,40 @@ pub fn delete_plugin(name: String) -> Result<(), String> {
         fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ─── Exclude Rules Commands ────────────────────────────────────
+
+#[tauri::command]
+pub fn save_exclude_rules(project_path: String, rules: Vec<String>) -> Result<(), String> {
+    let mut config = load_app_config();
+    if let Some(project) = config.projects.get_mut(&project_path) {
+        project.excluded_paths = rules;
+    } else {
+        let now = chrono_now();
+        config.projects.insert(
+            project_path.clone(),
+            ProjectConfig {
+                project_path,
+                checked_paths: Vec::new(),
+                excluded_paths: rules,
+                last_opened: now,
+                presets: HashMap::new(),
+                pinned: false,
+            },
+        );
+    }
+    save_app_config(&config)
+}
+
+#[tauri::command]
+pub fn load_exclude_rules(project_path: String) -> Result<Vec<String>, String> {
+    let config = load_app_config();
+    Ok(config
+        .projects
+        .get(&project_path)
+        .map(|p| p.excluded_paths.clone())
+        .unwrap_or_default())
 }
 
 // ─── Git Command ───────────────────────────────────────────────
